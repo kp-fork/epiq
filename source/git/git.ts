@@ -404,18 +404,25 @@ export const stageStateBranchOwnEventFile = async ({
 	stateBranchRoot: string;
 	ownEventFileName: string;
 }): Promise<Result<void>> => {
+	const eventPath = getRelativeEventFilePath(ownEventFileName);
+	const eventAbsolutePath = path.join(stateBranchRoot, eventPath);
+
+	const pathspec = ['.epiq/project.json'];
+
+	if (fs.existsSync(eventAbsolutePath)) {
+		pathspec.push(eventPath);
+	}
+
 	const stageResult = await git.stage({
 		cwd: stateBranchRoot,
-		pathspec: getRelativeEventFilePath(ownEventFileName),
+		pathspec,
 	});
 
 	if (isFail(stageResult)) {
-		return failed(
-			`Failed to stage state branch own event file\n${stageResult.message}`,
-		);
+		return failed(`Failed to stage state branch files\n${stageResult.message}`);
 	}
 
-	return succeeded('Staged state branch own event file', undefined);
+	return succeeded('Staged state branch files', undefined);
 };
 
 export const createStateBranchSyncCommit = async ({

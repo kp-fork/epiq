@@ -495,12 +495,10 @@ export const commands: CommandLineActionEntry[] = [
 		intent: CmdIntent.Init,
 		mode: Mode.COMMAND_LINE,
 		action: async () => {
-			const root = process.cwd(); // or wherever your root should come from
-
-			const projectResult = ensureProjectFile(root);
+			const projectResult = ensureProjectFile(process.cwd());
 			if (isFail(projectResult)) return projectResult;
 
-			const ignoreResult = await ensureLocalEpiqIgnored(root);
+			const ignoreResult = await ensureLocalEpiqIgnored(process.cwd());
 			if (isFail(ignoreResult)) return ignoreResult;
 
 			const result = persistPendingDefaultEvents();
@@ -513,9 +511,12 @@ export const commands: CommandLineActionEntry[] = [
 				selectedIndex: 0,
 			});
 
-			patchState({hasProject: true, mode: Mode.DEFAULT});
+			patchState({
+				hasProject: true,
+				mode: Mode.DEFAULT,
+			});
 
-			return succeeded(`Project initialized`, null);
+			return succeeded('Project initialized', null);
 		},
 	},
 	{

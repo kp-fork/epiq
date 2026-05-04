@@ -1,21 +1,21 @@
-import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {readProjectId} from '../lib/init/init.js';
 import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
+import {
+	EPIQ_DIR_NAME,
+	EVENTS_DIR_NAME,
+	GLOBAL_CONFIG_DIR_NAME,
+} from '../lib/storage/paths.js';
 import {memoizeResult} from '../lib/utils/memoize.js';
 import {logger} from '../logger.js';
 import {commitAndGetSha, execGit} from './git-utils.js';
-import {EPIQ_DIR_NAME, GLOBAL_CONFIG_DIR_NAME} from '../lib/storage/paths.js';
-import {EVENTS_DIR_NAME} from '../lib/storage/paths.js';
 
 export const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 export const getRelativeEventFilePath = (fileName: string): string =>
 	path.join(EPIQ_DIR_NAME, EVENTS_DIR_NAME, fileName);
-
-const getRepoId = (repoRoot: string): string =>
-	createHash('sha1').update(path.resolve(repoRoot)).digest('hex').slice(0, 12);
 
 export const getEpiqGlobal = (): string =>
 	path.join(os.homedir(), GLOBAL_CONFIG_DIR_NAME);
@@ -23,8 +23,15 @@ export const getEpiqGlobal = (): string =>
 export const getWorktreesRoot = (): string =>
 	path.join(getEpiqGlobal(), 'worktrees');
 
-export const getStateBranchRoot = (repoRoot: string): string =>
-	path.join(getWorktreesRoot(), getRepoId(repoRoot));
+export const getStateBranchRoot = (repoRoot: string): Result<string> => {
+	const projectIdResult = readProjectId(repoRoot);
+	if (isFail(projectIdResult)) return failed(projectIdResult.message);
+
+	return succeeded(
+		'Resolved state branch root',
+		path.join(getWorktreesRoot(), projectIdResult.value),
+	);
+};
 
 const getEpiqRoot = (root: string): string => path.join(root, EPIQ_DIR_NAME);
 

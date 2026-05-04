@@ -15,6 +15,9 @@ import type {NavNode} from '../model/navigation-node.model.js';
 import {ticketMatchesFilter} from '../utils/filter.js';
 import {buildBreadCrumb} from '../utils/nav-tree.js';
 import {buildActionIndex} from './action-helper.js';
+import {readProjectFile} from '../init/init.js';
+import {getRepoRootDir} from '../../git/git-storage.js';
+import {resolveClosestEpiqProjectRoot} from '../storage/paths.js';
 
 type DerivedKeys =
 	| 'availableActions'
@@ -112,6 +115,12 @@ export const getState = () => {
 export function initWorkspaceState(workspace: Workspace) {
 	_initialWorkspace = workspace;
 
+	const repoRootResult = resolveClosestEpiqProjectRoot(process.cwd());
+	if (isFail(repoRootResult)) return failed(repoRootResult.message);
+
+	const projectDataResult = readProjectFile(repoRootResult.value);
+	const hasProject = !isFail(projectDataResult);
+
 	const base: BaseState = {
 		readOnly: false,
 		filters: [],
@@ -131,6 +140,7 @@ export function initWorkspaceState(workspace: Workspace) {
 		eventLog: [],
 		unappliedEvents: [],
 		timeMode: 'live',
+		hasProject: hasProject,
 	};
 
 	const deriveResult = derive(base);

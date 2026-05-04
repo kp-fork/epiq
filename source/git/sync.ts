@@ -1,10 +1,13 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
+import {getProjectFilePath} from '../lib/storage/paths.js';
+import {STATE_BRANCH} from './git-constants.js';
 import {
 	ensureStateBranchLayout,
 	getEventFilePath,
-	getStateBranchRoot,
 	getRepoRootDir,
+	getStateBranchRoot,
 } from './git-storage.js';
 import {
 	execGit,
@@ -21,10 +24,47 @@ import {
 	pushStateBranch,
 	stageStateBranchOwnEventFile,
 } from './git.js';
-import {ensureLocalEpiqIgnored} from './ensure-local-events-ignored.js';
-import {hydrateEventsFromStateBranch} from './merge.js';
-import {mergeEventFile} from './merge.js';
-import {STATE_BRANCH} from './git-constants.js';
+import {hydrateEventsFromStateBranch, mergeEventFile} from './merge.js';
+
+const syncProjectFileFromStateBranch = ({
+	repoRoot,
+	stateBranchRoot,
+}: {
+	repoRoot: string;
+	stateBranchRoot: string;
+}): Result<boolean> => {
+	const localProjectFile = getProjectFilePath(repoRoot);
+	const stateProjectFile = getProjectFilePath(stateBranchRoot);
+
+	if (!fs.existsSync(stateProjectFile)) {
+		return succeeded('No project.json found in state branch', false);
+	}
+
+	fs.mkdirSync(path.dirname(localProjectFile), {recursive: true});
+	fs.copyFileSync(stateProjectFile, localProjectFile);
+
+	return succeeded('Synced project.json from state branch', true);
+};
+
+const syncProjectFileToStateBranch = ({
+	repoRoot,
+	stateBranchRoot,
+}: {
+	repoRoot: string;
+	stateBranchRoot: string;
+}): Result<boolean> => {
+	const localProjectFile = getProjectFilePath(repoRoot);
+	const stateProjectFile = getProjectFilePath(stateBranchRoot);
+
+	if (!fs.existsSync(localProjectFile)) {
+		return failed('Missing local .epiq/project.json');
+	}
+
+	fs.mkdirSync(path.dirname(stateProjectFile), {recursive: true});
+	fs.copyFileSync(localProjectFile, stateProjectFile);
+
+	return succeeded('Synced project.json to state branch', true);
+};
 
 export const syncEpiqFromRemote = async (
 	cwd = process.cwd(),
@@ -42,6 +82,12 @@ export const syncEpiqFromRemote = async (
 		branch: STATE_BRANCH,
 	});
 	if (isFail(pullResult)) return failed(pullResult.message);
+
+	const projectFileResult = syncProjectFileFromStateBranch({
+		repoRoot,
+		stateBranchRoot,
+	});
+	if (isFail(projectFileResult)) return failed(projectFileResult.message);
 
 	const hydrateResult = hydrateEventsFromStateBranch({
 		repoRoot,
@@ -122,7 +168,12 @@ const ensureSyncReady = async ({
 	if (isFail(repoRootResult)) return failed(repoRootResult.message);
 
 	const repoRoot = repoRootResult.value;
-	const stateBranchRoot = getStateBranchRoot(repoRoot);
+	const stateBranchRootResult = getStateBranchRoot(repoRoot);
+	if (isFail(stateBranchRootResult)) {
+		return failed(stateBranchRootResult.message);
+	}
+
+	const stateBranchRoot = stateBranchRootResult.value;
 
 	const repoOpResult = await hasInProgressGitOperation(repoRoot);
 	if (isFail(repoOpResult)) return failed(repoOpResult.message);
@@ -175,6 +226,12 @@ const commitOwnEventFileToStateBranch = async ({
 		ownEventFileName,
 	});
 	if (isFail(mergeResult)) return failed(mergeResult.message);
+
+	const projectFileResult = syncProjectFileToStateBranch({
+		repoRoot,
+		stateBranchRoot,
+	});
+	if (isFail(projectFileResult)) return failed(projectFileResult.message);
 
 	const changedResult = await hasStateBranchChanges(stateBranchRoot);
 	if (isFail(changedResult)) return failed(changedResult.message);
@@ -244,6 +301,12 @@ export const syncEpiqWithRemote = async ({
 	if (isFail(pullResult)) return failed(pullResult.message);
 
 	pulled = pullResult.value;
+
+	const projectFileResult = syncProjectFileFromStateBranch({
+		repoRoot,
+		stateBranchRoot,
+	});
+	if (isFail(projectFileResult)) return failed(projectFileResult.message);
 
 	const hydrateResult = hydrateEventsFromStateBranch({
 		repoRoot,

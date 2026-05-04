@@ -1,10 +1,9 @@
 import {Box} from 'ink';
 import React from 'react';
-import {hasPendingDefaultEvents} from '../event/event-boot.js';
-import {isSuccess} from '../model/result-types.js';
 import {getUserSetupStatus} from '../config/setup-utils.js';
 import {Mode} from '../model/action-map.model.js';
 import {findInBreadCrumb} from '../model/app-state.model.js';
+import {isSuccess} from '../model/result-types.js';
 import {getRenderedChildren, getState, useAppState} from '../state/state.js';
 import {ContextBar} from './ContextBar.js';
 import {HelpUI} from './Help.js';
@@ -34,8 +33,7 @@ export default function EpiqApp({width, height}: EpiqAppProps) {
 		getUserSetupStatus();
 
 	const isSetupMode = !isSetup;
-	const isUninitializedRepo =
-		isSetup && (!state.hasProject || hasPendingDefaultEvents());
+	const isUninitializedRepo = isSetup && !state.hasProject;
 
 	if (isSetupMode) {
 		return (

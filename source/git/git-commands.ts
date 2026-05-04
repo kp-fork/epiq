@@ -1,8 +1,8 @@
 import {execGit} from './git-utils.js';
 
 export const git = {
-	stage: ({cwd, pathspec}: {cwd: string; pathspec: string}) =>
-		execGit({args: ['add', pathspec], cwd}),
+	stage: ({cwd, pathspec}: {cwd: string; pathspec: string[]}) =>
+		execGit({args: ['add', ...pathspec], cwd}),
 
 	commit: ({
 		cwd,
