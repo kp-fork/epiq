@@ -150,6 +150,7 @@ describe('TagTicket command', () => {
 				id: 'tag-assignment-node-id',
 				target: 'ticket-1',
 				tagId: 'tag-123',
+				rank: 'm0',
 			},
 		});
 	});
@@ -197,6 +198,7 @@ describe('TagTicket command', () => {
 				id: 'new-tag-assignment-node-id',
 				target: 'ticket-1',
 				tagId: 'new-tag-id',
+				rank: 'm0',
 			},
 		});
 	});
@@ -243,6 +245,7 @@ describe('TagTicket command', () => {
 				id: 'tag-assignment-node-id',
 				target: 'ticket-99',
 				tagId: 'tag-123',
+				rank: 'm0',
 			},
 		});
 	});
@@ -352,6 +355,7 @@ describe('AssignUserToTicket command', () => {
 				id: 'assignment-node-id',
 				target: 'ticket-1',
 				contributor: 'user-123',
+				rank: 'm0',
 			},
 		});
 	});
@@ -399,6 +403,7 @@ describe('AssignUserToTicket command', () => {
 				id: 'new-assignment-node-id',
 				target: 'ticket-1',
 				contributor: 'new-contributor-id',
+				rank: 'm0',
 			},
 		});
 	});
