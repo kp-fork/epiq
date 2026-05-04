@@ -25,36 +25,6 @@ import {
 	hasWorktree,
 } from './git-utils.js';
 
-export const ensureLocalEventsIgnored = async (
-	repoRoot: string,
-): Promise<Result<boolean>> => {
-	const gitignorePath = path.join(repoRoot, '.gitignore');
-	let content = fs.existsSync(gitignorePath)
-		? fs.readFileSync(gitignorePath, 'utf8')
-		: '';
-
-	const ignorePattern = '.epiq';
-	const lines = content.split('\n');
-
-	// More tolerant check that survives comments, extra spaces, trailing slashes
-	const alreadyIgnored = lines.some(line => {
-		const trimmed = line.trim();
-		return trimmed === ignorePattern || trimmed === ignorePattern + '/';
-	});
-
-	if (alreadyIgnored) {
-		return succeeded(`${ignorePattern} already ignored`, false);
-	}
-
-	const markerComment = `# [epiq]: hydrated state is never to be committed`;
-	content = content.trimEnd() + `\n\n${markerComment}\n${ignorePattern}\n`;
-
-	fs.writeFileSync(gitignorePath, content + '\n', 'utf8');
-
-	logger.info(`Added ${ignorePattern} to .gitignore (epiq local cache)`);
-	return succeeded(`${ignorePattern} ignored`, true);
-};
-
 export const ensureInitialCommit = async (
 	repoRoot: string,
 ): Promise<Result<boolean>> => {

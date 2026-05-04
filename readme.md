@@ -111,11 +111,28 @@ epiq
 
 If it is your first run, this opens the interactive setup wizard that sets you up in about 30 seconds.
 
-From here, you can start running commands or use keyboard shortcuts to navigate.
+This creates settings in `~/.epiq-global/**`.
 
-This creates settings in `~/.epiq-global/**` and initializes synchronization for your repository. A local `.epiq` folder will also be created in your repository.
+If the current folder is not yet an Epiq project, you will see an initialization screen.
 
-> Epiq will execute git commands on your behalf in order to sync your work with a dedicated state branch remotely.
+Initialization will:
+
+Create a project anchor:
+
+```
+.epiq/project.json
+```
+
+Create local state directories:
+
+```
+.epiq/events/
+.epiq/logs/
+```
+
+Update your `.gitignore` to ignore local-only directories (`.epiq/events/`, `.epiq/logs/`)
+
+> When synced, Epiq will execute git commands on your behalf, targeting a dedicated state branch
 
 ## Usage Guide
 
@@ -166,9 +183,7 @@ Clear all filters with `:filter clear`
 Epiq uses Git in the background to synchronize state between clients. No manual git commands are required to make it work. Running `:sync` pulls and pushes changes between your local state and the remote state.
 
 - Your issue data is stored in a dedicated branch managed automatically by epiq
-- A local `.epiq/` folder is created in your project as a local cache
-
-The `.epiq/` folder is non-authoritative and used for caching and local tracking. Epiq automatically ensures it is gitignored on every sync.
+- A `.epiq/` folder is created in your project, containing both shared project metadata and local state.
 
 ## Conflict Avoidance & Data Integrity
 

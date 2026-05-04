@@ -9,6 +9,7 @@ import {useAppState} from '../state/state.js';
 import {theme} from '../theme/themes.js';
 import {Breadcrumb} from './BreadCrumb.js';
 import {FilterUI} from './Filters.js';
+import {EPIQ_VERSION} from '../../version.js';
 
 type Props = {
 	filters: Filter[];
@@ -54,6 +55,9 @@ export function Topbar({filters, hideBreadCrumb = false}: Props) {
 					overflow="hidden"
 					justifyContent="flex-end"
 				>
+					<Text dimColor={true} color={theme.secondary2}>
+						{EPIQ_VERSION + ' '}
+					</Text>
 					<HeaderPill icon="@" value={userName} />
 					<HeaderPill icon="❯" value={preferredEditor} />
 				</Box>

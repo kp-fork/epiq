@@ -1,75 +1,24 @@
-import chalk from 'chalk';
-import {Box, Text} from 'ink';
+import {Box} from 'ink';
 import React from 'react';
 import {hasPendingDefaultEvents} from '../event/event-boot.js';
 import {isSuccess} from '../model/result-types.js';
-import {ContextBar} from './ContextBar.js';
-import {HelpUI} from './Help.js';
-import {Topbar} from './Topbar.js';
-import {WorkspaceUI} from './WorkspaceUI.js';
 import {getUserSetupStatus} from '../config/setup-utils.js';
 import {Mode} from '../model/action-map.model.js';
 import {findInBreadCrumb} from '../model/app-state.model.js';
 import {getRenderedChildren, getState, useAppState} from '../state/state.js';
-import {theme} from '../theme/themes.js';
+import {ContextBar} from './ContextBar.js';
+import {HelpUI} from './Help.js';
+import {InitProjectUI} from './InitProjectUI.js';
 import SettingsUI from './SettingsUI.js';
+import {Topbar} from './Topbar.js';
+import {WorkspaceUI} from './WorkspaceUI.js';
 
-type AppProps = {
+type EpiqAppProps = {
 	height: number;
 	width: number;
 };
 
-type InitProjectUIProps = {
-	width: number;
-	height: number;
-};
-
-const InitProjectUI: React.FC<InitProjectUIProps> = ({width, height}) => {
-	return (
-		<Box
-			height={height - 4}
-			flexDirection="column"
-			width={width}
-			paddingTop={1}
-			paddingLeft={2}
-			borderStyle="round"
-			borderColor={theme.secondary}
-			rowGap={1}
-		>
-			<Text color={theme.accent} bold>
-				Initialize project
-			</Text>
-
-			<Text>{`This folder is not an ${chalk.hex(theme.accent)(
-				'epiq',
-			)} project yet.`}</Text>
-
-			<Text color={theme.primary}>
-				To start tracking issues here, we need to initialize a new{' '}
-				<Text color={theme.primary} backgroundColor={theme.secondary}>
-					{' ' + '.epiq/' + ' '}
-				</Text>{' '}
-				directory in this repository.
-			</Text>
-
-			<Box marginTop={1} flexDirection="column">
-				<Box>
-					<Text color={theme.accent}>{'   '}</Text>
-					<Text color={theme.primary}>Type </Text>
-					<Text backgroundColor={theme.secondary}>{' :init '}</Text>
-				</Box>
-			</Box>
-
-			<Box marginTop={1}>
-				<Text color={theme.secondary2}>
-					(This will create the local epiq project files)
-				</Text>
-			</Box>
-		</Box>
-	);
-};
-
-export default function App({width, height}: AppProps) {
+export default function EpiqApp({width, height}: EpiqAppProps) {
 	const state = useAppState();
 	const filters = state.filters;
 
@@ -85,7 +34,8 @@ export default function App({width, height}: AppProps) {
 		getUserSetupStatus();
 
 	const isSetupMode = !isSetup;
-	const isUninitializedRepo = isSetup && hasPendingDefaultEvents();
+	const isUninitializedRepo =
+		isSetup && (!state.hasProject || hasPendingDefaultEvents());
 
 	if (isSetupMode) {
 		return (
@@ -129,6 +79,7 @@ export default function App({width, height}: AppProps) {
 	}
 
 	const board = findInBreadCrumb(getState().breadCrumb ?? [], 'BOARD');
+
 	if (isSuccess(board)) {
 		const boardId = board.value.id;
 		const numberOfSwimlanes = getRenderedChildren(boardId).length;
@@ -138,6 +89,7 @@ export default function App({width, height}: AppProps) {
 			width / Math.max(numberOfSwimlanes, 1),
 		);
 		const colWidth = Math.min(swimlaneDynamicWidth, swimlaneMaxWidth);
+
 		width = colWidth * Math.max(numberOfSwimlanes, swimlanePart);
 	}
 

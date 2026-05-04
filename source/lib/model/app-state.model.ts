@@ -39,6 +39,7 @@ export type SyncStatus = {
 };
 
 export type AppState = {
+	hasProject: boolean;
 	readOnly: boolean;
 	selectedIndex: number;
 	selectedNode: NavNode<AnyContext> | null;

@@ -61,6 +61,8 @@ import {cmdValidity} from './cmd-validity.js';
 import {CmdIntent} from './command-meta.js';
 import {getCmdModifiers} from './command-modifiers.js';
 import {parsePeekDateInput} from './validate-date.js';
+import {ensureProjectFile} from '../init/init.js';
+import {ensureLocalEpiqIgnored} from '../../git/ensure-local-events-ignored.js';
 
 const findTagByName = (name: string) =>
 	Object.values(getState().tags).find(tag => tag.name === name);
@@ -492,15 +494,27 @@ export const commands: CommandLineActionEntry[] = [
 	{
 		intent: CmdIntent.Init,
 		mode: Mode.COMMAND_LINE,
-		action: () => {
+		action: async () => {
+			const root = process.cwd(); // or wherever your root should come from
+
+			const projectResult = ensureProjectFile(root);
+			if (isFail(projectResult)) return projectResult;
+
+			const ignoreResult = await ensureLocalEpiqIgnored(root);
+			if (isFail(ignoreResult)) return ignoreResult;
+
 			const result = persistPendingDefaultEvents();
 			if (isFail(result)) return result;
+
 			const {rootNodeId, nodes} = getState();
+
 			navigationUtils.navigate({
 				currentNode: nodes[rootNodeId],
 				selectedIndex: 0,
 			});
-			patchState({mode: Mode.DEFAULT});
+
+			patchState({hasProject: true, mode: Mode.DEFAULT});
+
 			return succeeded(`Project initialized`, null);
 		},
 	},
