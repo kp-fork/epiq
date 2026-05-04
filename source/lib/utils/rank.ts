@@ -1,70 +1,80 @@
+import {failed, isFail, Result, succeeded} from '../model/result-types.js';
+
 // - Fixed-width strings so lexicographic order === numeric order
 // - Huge integer space (BigInt)
-// - "midpoint" insertion with exhaustion detection (returns '' when no room)
+// - "midpoint" insertion with exhaustion detection
 
-export const HEX_LEN = 24n; // 24 hex chars = 96 bits (fixed width)
-const BIT_WIDTH = HEX_LEN * 4n; // 4 bits per hex char
+export const HEX_LEN = 24n; // 24 hex chars = 96 bits
+const BIT_WIDTH = HEX_LEN * 4n;
 export const MAX_RANK = (1n << BIT_WIDTH) - 1n;
 
 const HEX_RE = /^[0-9a-f]+$/;
 
-export function hexToBigInt(rank: string): bigint {
+export function hexToBigInt(rank: string): Result<bigint> {
 	if (!rank || !HEX_RE.test(rank)) {
-		throw new Error(`Invalid hex rank: ${rank}`);
+		return failed(`Invalid hex rank: ${rank}`);
 	}
-	return BigInt('0x' + rank);
+
+	return succeeded('Converted rank to bigint', BigInt('0x' + rank));
 }
 
-export function bigIntToHex(n: bigint, len: bigint = HEX_LEN): string {
-	if (n < 0n) throw new Error('Negative rank not allowed');
-	const hex = n.toString(16); // lowercase
-	return hex.padStart(Number(len), '0');
+export function bigIntToHex(n: bigint, len: bigint = HEX_LEN): Result<string> {
+	if (n < 0n) return failed('Negative rank not allowed');
+
+	const hex = n.toString(16);
+	return succeeded(
+		'Converted bigint to hex rank',
+		hex.padStart(Number(len), '0'),
+	);
 }
 
-/**
- * Returns a fixed-width hex rank strictly between prev and next.
- * If there is no room (gap <= 1), returns '' (signals exhaustion).
- */
-export function rankBetween(prev?: string, next?: string): string {
+export function rankBetween(prev?: string, next?: string): Result<string> {
 	if (!prev && !next) {
-		// Center of entire rank space
 		return bigIntToHex(MAX_RANK / 2n, HEX_LEN);
 	}
 
-	const a = prev ? hexToBigInt(prev) : 0n;
-	const b = next ? hexToBigInt(next) : MAX_RANK;
+	const aResult = prev
+		? hexToBigInt(prev)
+		: succeeded('Resolved lower bound', 0n);
+	if (isFail(aResult)) return aResult;
+
+	const bResult = next
+		? hexToBigInt(next)
+		: succeeded('Resolved upper bound', MAX_RANK);
+	if (isFail(bResult)) return bResult;
+
+	const a = aResult.value;
+	const b = bResult.value;
 
 	if (b <= a) {
-		// Corrupt / unexpected ordering; recover to center
 		return bigIntToHex(MAX_RANK / 2n, HEX_LEN);
 	}
 
 	const mid = (a + b) / 2n;
-	if (mid === a || mid === b) return ''; // no room
+	if (mid === a || mid === b) {
+		return failed('No rank space available between neighbors');
+	}
 
 	return bigIntToHex(mid, HEX_LEN);
 }
 
-/**
- * Convenience fallback rank (center). Useful when recovering from weird states.
- */
-export function midRank(): string {
+export function midRank(): Result<string> {
 	return bigIntToHex(MAX_RANK / 2n, HEX_LEN);
 }
 
-/**
- * Returns evenly spaced ranks for N items across the full range.
- * Useful for rebalancing.
- */
-export function evenlySpacedRanks(count: number): string[] {
-	if (count <= 0) return [];
+export function evenlySpacedRanks(count: number): Result<string[]> {
+	if (count <= 0) return succeeded('Resolved empty rank list', []);
+
 	const n = BigInt(count);
 	const out: string[] = [];
 
 	for (let i = 0; i < count; i++) {
 		const r = (MAX_RANK * BigInt(i + 1)) / (n + 1n);
-		out.push(bigIntToHex(r, HEX_LEN));
+		const rankResult = bigIntToHex(r, HEX_LEN);
+
+		if (isFail(rankResult)) return rankResult;
+		out.push(rankResult.value);
 	}
 
-	return out;
+	return succeeded('Resolved evenly spaced ranks', out);
 }

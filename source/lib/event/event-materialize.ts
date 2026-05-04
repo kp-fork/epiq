@@ -33,7 +33,7 @@ const materializeFail = <A extends AppEvent>(
 const materializeHandlers: MaterializeHandlers = {
 	'init.workspace': event => {
 		const {id, name, rank} = event.payload;
-		const workspace = {...nodes.workspace(id, name), rank};
+		const workspace = nodes.workspace(id, name, rank);
 
 		initWorkspaceState(workspace);
 
@@ -57,7 +57,7 @@ const materializeHandlers: MaterializeHandlers = {
 
 	'add.workspace': event => {
 		const {id, name, rank} = event.payload;
-		const workspace = {...nodes.workspace(id, name), rank};
+		const workspace = nodes.workspace(id, name, rank);
 
 		const result = nodeRepo.createNode(workspace);
 		if (isFail(result)) {
@@ -80,10 +80,7 @@ const materializeHandlers: MaterializeHandlers = {
 	'add.board': event => {
 		const {id, name, parent: parentId, rank} = event.payload;
 
-		const result = nodeRepo.createNode({
-			...nodes.board(id, name, parentId),
-			rank,
-		});
+		const result = nodeRepo.createNode(nodes.board(id, name, parentId, rank));
 
 		if (isFail(result)) {
 			return materializeFail(result.message ?? 'Unable to create board', event);
@@ -102,10 +99,9 @@ const materializeHandlers: MaterializeHandlers = {
 	'add.swimlane': event => {
 		const {id, name, parent: parentId, rank} = event.payload;
 
-		const result = nodeRepo.createNode({
-			...nodes.swimlane(id, name, parentId),
-			rank,
-		});
+		const result = nodeRepo.createNode(
+			nodes.swimlane(id, name, parentId, rank),
+		);
 
 		if (isFail(result)) {
 			return materializeFail(
@@ -127,14 +123,12 @@ const materializeHandlers: MaterializeHandlers = {
 	'add.issue': event => {
 		const {id, name, parent: parentId, rank} = event.payload;
 
-		const result = nodeRepo.createNode({
-			...nodes.ticket(id, name, parentId),
-			rank,
-		});
+		const result = nodeRepo.createNode(nodes.ticket(id, name, parentId, rank));
 
 		if (isFail(result)) {
 			return materializeFail(result.message ?? 'Unable to create issue', event);
 		}
+
 		if (!isTicketNode(result.value)) {
 			return failed('Unexpected create node return value');
 		}
@@ -148,16 +142,16 @@ const materializeHandlers: MaterializeHandlers = {
 	'add.field': event => {
 		const {id, name, parent: parentId, val: value, rank} = event.payload;
 
-		const result = nodeRepo.createNode({
-			...nodes.field(
+		const result = nodeRepo.createNode(
+			nodes.field(
 				id,
 				name,
 				parentId,
+				rank,
 				{value},
 				name.includes('Description') ? 'vertical' : 'horizontal',
 			),
-			rank,
-		});
+		);
 
 		if (isFail(result)) {
 			return materializeFail(
@@ -239,8 +233,8 @@ const materializeHandlers: MaterializeHandlers = {
 	},
 
 	'tag.issue': event => {
-		const {id, target: targetId, tagId} = event.payload;
-		const tagged = nodeRepo.tag(targetId, tagId, id);
+		const {id, target: targetId, tagId, rank} = event.payload;
+		const tagged = nodeRepo.tag(targetId, tagId, id, rank);
 
 		if (isFail(tagged)) {
 			return materializeFail(tagged.message ?? 'Unable to tag issue', event);
@@ -267,8 +261,13 @@ const materializeHandlers: MaterializeHandlers = {
 	},
 
 	'assign.issue': event => {
-		const {id, contributor: contributorId, target: targetId} = event.payload;
-		const result = nodeRepo.assign(targetId, contributorId, id);
+		const {
+			id,
+			contributor: contributorId,
+			target: targetId,
+			rank,
+		} = event.payload;
+		const result = nodeRepo.assign(targetId, contributorId, id, rank);
 
 		if (isFail(result)) {
 			return materializeFail(result.message ?? 'Unable to assign issue', event);
@@ -414,6 +413,36 @@ const materializeHandlers: MaterializeHandlers = {
 		return succeeded('Node locked', {
 			action: event.action,
 			result: result.value,
+		});
+	},
+
+	'rebalance.children': event => {
+		const {parent, ranks} = event.payload;
+
+		for (const [id, rank] of Object.entries(ranks)) {
+			const node = nodeRepo.getNode(id);
+			if (!node) return materializeFail(`Unable to locate node ${id}`, event);
+
+			if (node.parentNodeId !== parent) {
+				return materializeFail(`Node ${id} is not child of ${parent}`, event);
+			}
+
+			const result = nodeRepo.updateNode({
+				...node,
+				rank,
+			});
+
+			if (isFail(result)) {
+				return materializeFail(
+					result.message ?? 'Unable to rebalance child',
+					event,
+				);
+			}
+		}
+
+		return succeeded('Rebalanced children', {
+			action: event.action,
+			result: {parent},
 		});
 	},
 };

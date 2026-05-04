@@ -1,4 +1,3 @@
-import {MovePosition} from '../event/event.model.js';
 import {
 	failed,
 	isFail,
@@ -11,8 +10,7 @@ import {AnyContext} from '../model/context.model.js';
 import {NavNode} from '../model/navigation-node.model.js';
 import {nodes} from '../state/node-builder.js';
 import {getState, patchState, updateState} from '../state/state.js';
-import {midRank} from '../utils/rank.js';
-import {getOrderedChildren, resolveMoveRank} from './rank.js';
+import {getOrderedChildren} from './rank.js';
 
 export const findAncestor = <T extends AnyContext>(
 	targetId: string,
@@ -68,7 +66,6 @@ const failIfReadonly = (
 };
 
 export const nodeRepo = {
-	/* Only to be used for TEMP nodes*/
 	deleteNode(nodeId: string) {
 		updateState(s => {
 			const nextNodes = {...s.nodes};
@@ -96,7 +93,7 @@ export const nodeRepo = {
 			},
 		};
 
-		nodeRepo.updateNode(updatedNode);
+		this.updateNode(updatedNode);
 		return succeeded('Issue description updated', {md});
 	},
 
@@ -180,26 +177,6 @@ export const nodeRepo = {
 		return succeeded('Moved node successfully', movedNode);
 	},
 
-	moveNodeToPosition({
-		id,
-		parentId,
-		position = {at: 'end'},
-	}: {
-		id: string;
-		parentId: string;
-		position?: MovePosition;
-	}): Result<NavNode<AnyContext>> {
-		const siblings = getOrderedChildren(parentId).filter(x => x.id !== id);
-		const rankResult = resolveMoveRank(siblings, position);
-		if (isFail(rankResult)) return rankResult;
-
-		return this.moveNodeToRank({
-			id,
-			parentId,
-			rank: rankResult.value,
-		});
-	},
-
 	tombstoneNode(nodeId: string): Result<NavNode<AnyContext>> {
 		const {nodes, currentNodeId, rootNodeId} = getState();
 
@@ -230,13 +207,9 @@ export const nodeRepo = {
 			nextNodes[id] = {...nextNodes[id], isDeleted: true};
 		}
 
-		if (!currentNodeId) {
-			return failed('Unable to delete undefined');
-		}
+		if (!currentNodeId) return failed('Unable to delete undefined');
 
-		patchState({
-			nodes: nextNodes,
-		});
+		patchState({nodes: nextNodes});
 
 		return succeeded('Successfully tomb stoned', node);
 	},
@@ -249,13 +222,20 @@ export const nodeRepo = {
 				[contributor.id]: contributor,
 			},
 		}));
+
 		if (isFail(result)) return failed('Unable to create contributor');
 		return succeeded('Created contributor', contributor);
 	},
 
-	assign(targetId: string, contributorId: string, assignmentNodeId: string) {
-		const contributor = nodeRepo.getContributor(contributorId);
-		const target = nodeRepo.getNode(targetId);
+	assign(
+		targetId: string,
+		contributorId: string,
+		assignmentNodeId: string,
+		rank: string,
+	): Result<NavNode<'FIELD'>> {
+		const contributor = this.getContributor(contributorId);
+		const target = this.getNode(targetId);
+
 		if (!target || !contributor) {
 			return failed('Unable assign contributor to issue');
 		}
@@ -271,14 +251,18 @@ export const nodeRepo = {
 			return failed('Contributor already assigned');
 		}
 
-		const result = this.createNodeAtPosition(
-			nodes.field(assignmentNodeId, contributor.name, assigneesField.id, {
-				value: contributorId,
-			}),
+		const assignmentNode = nodes.field(
+			assignmentNodeId,
+			contributor.name,
+			assigneesField.id,
+			rank,
+			{value: contributorId},
 		);
 
+		const result = this.createNode(assignmentNode);
 		if (isFail(result)) return result;
-		return succeeded('Assigned contributor', result.value);
+
+		return succeeded('Assigned contributor', assignmentNode);
 	},
 
 	createTag(tag: Tag): Result<Tag> {
@@ -289,6 +273,7 @@ export const nodeRepo = {
 				[tag.id]: tag,
 			},
 		}));
+
 		if (isFail(result)) return failed('Could not create tag');
 		return succeeded('Tag created', tag);
 	},
@@ -297,9 +282,11 @@ export const nodeRepo = {
 		targetId: string,
 		tagId: string,
 		tagNodeId: string,
+		rank: string,
 	): Result<NavNode<'FIELD'>> {
-		const tag = nodeRepo.getTag(tagId);
-		const target = nodeRepo.getNode(targetId);
+		const tag = this.getTag(tagId);
+		const target = this.getNode(targetId);
+
 		if (!tag) return failed('Unable to add tag, missing tag');
 		if (!target) return failed('Unable to add tag, missing target');
 
@@ -314,19 +301,20 @@ export const nodeRepo = {
 			return failed('Tag already assigned');
 		}
 
-		const result = this.createNodeAtPosition(
-			nodes.field(tagNodeId, tag.name, tagsField.id, {
-				value: tagId,
-			}),
-		);
+		const tagNode = nodes.field(tagNodeId, tag.name, tagsField.id, rank, {
+			value: tagId,
+		});
 
+		const result = this.createNode(tagNode);
 		if (isFail(result)) return result;
-		return succeeded('Tag added', result.value);
+
+		return succeeded('Tag added', tagNode);
 	},
 
 	untag(targetId: string, tagId: string): Result<NavNode<'FIELD'>> {
-		const tag = nodeRepo.getTag(tagId);
-		const target = nodeRepo.getNode(targetId);
+		const tag = this.getTag(tagId);
+		const target = this.getNode(targetId);
+
 		if (!tag) return failed('Unable to remove tag, missing tag');
 		if (!target) return failed('Unable to remove tag, missing target');
 
@@ -352,8 +340,8 @@ export const nodeRepo = {
 	},
 
 	unassign(targetId: string, contributorId: string): Result<NavNode<'FIELD'>> {
-		const contributor = nodeRepo.getContributor(contributorId);
-		const target = nodeRepo.getNode(targetId);
+		const contributor = this.getContributor(contributorId);
+		const target = this.getNode(targetId);
 
 		if (!contributor) return failed('Unable to unassign, missing contributor');
 		if (!target) return failed('Unable to unassign, missing target');
@@ -379,29 +367,6 @@ export const nodeRepo = {
 		return succeeded('Assignee removed', nextNode);
 	},
 
-	createNodeAtPosition<T extends AnyContext>(
-		node: NavNode<T>,
-		position: MovePosition = {at: 'end'},
-	): Result<NavNode<T>> {
-		if (!node.parentNodeId) {
-			const withRank = {...node, rank: midRank()};
-			this.createNode(withRank);
-			return succeeded('Created node', withRank);
-		}
-
-		const siblings = getOrderedChildren(node.parentNodeId);
-		const rankResult = resolveMoveRank(siblings, position);
-		if (isFail(rankResult)) return rankResult;
-
-		const withRank: NavNode<T> = {
-			...node,
-			rank: rankResult.value,
-		};
-
-		this.createNode(withRank);
-		return succeeded('Created node', withRank);
-	},
-
 	createNode<T extends AnyContext>(
 		node: NavNode<T>,
 	): Result<NavNode<AnyContext>> {
@@ -412,6 +377,7 @@ export const nodeRepo = {
 				[node.id]: node,
 			},
 		}));
+
 		if (isFail(result)) return failed('Unable to create node');
 
 		return succeeded('Node created', node);
@@ -433,6 +399,7 @@ export const nodeRepo = {
 				[id]: updatedNode,
 			},
 		}));
+
 		if (isFail(result)) return failed(result.message);
 
 		return succeeded('Locked node', updatedNode);
@@ -463,9 +430,7 @@ export const nodeRepo = {
 		return getState().nodes[id] as NavNode<T> | undefined;
 	},
 
-	getSiblings: (parentId: string) => {
-		return Object.values(getState().nodes)
-			.filter(x => !x.isDeleted && x.parentNodeId === parentId)
-			.sort((a, b) => a.rank.localeCompare(b.rank));
+	getSiblings(parentId: string) {
+		return getOrderedChildren(parentId);
 	},
 };

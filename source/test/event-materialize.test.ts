@@ -6,8 +6,13 @@ import {isFail, Result} from '../lib/model/result-types.js';
 import {nodeRepo} from '../lib/repository/node-repo.js';
 import {nodes} from '../lib/state/node-builder.js';
 import {initWorkspaceState} from '../lib/state/state.js';
-import {midRank} from '../lib/utils/rank.js';
+import {bigIntToHex, midRank} from '../lib/utils/rank.js';
 
+const rank = () => {
+	const result = midRank();
+	if (isFail(result)) throw new Error(result.message);
+	return result.value;
+};
 const actor = {
 	userId: 'u1',
 	userName: 'alice',
@@ -34,19 +39,19 @@ const setupWorkspace = () => {
 		event('init.workspace', {
 			id: 'workspace-1',
 			name: 'Workspace',
-			rank: midRank(),
+			rank: rank(),
 		}),
 		event('add.board', {
 			id: 'board-1',
 			name: 'Board',
 			parent: 'workspace-1',
-			rank: midRank(),
+			rank: rank(),
 		}),
 		event('add.swimlane', {
 			id: 'swimlane-1',
 			name: 'Todo',
 			parent: 'board-1',
-			rank: midRank(),
+			rank: rank(),
 		}),
 		event('add.swimlane', {
 			id: CLOSED_SWIMLANE_ID,
@@ -58,7 +63,7 @@ const setupWorkspace = () => {
 			id: 'issue-1',
 			name: 'Issue',
 			parent: 'swimlane-1',
-			rank: midRank(),
+			rank: rank(),
 		}),
 	] as const);
 
@@ -69,7 +74,13 @@ const setupWorkspace = () => {
 
 beforeEach(() => {
 	eventSeq = 0;
-	initWorkspaceState(nodes.workspace('test-root', 'Test Root'));
+
+	const rankResult = bigIntToHex(1n);
+	if (isFail(rankResult)) throw new Error(rankResult.message);
+
+	initWorkspaceState(
+		nodes.workspace('test-root', 'Test Root', rankResult.value),
+	);
 });
 
 describe('event materialize', () => {
@@ -128,7 +139,7 @@ describe('event materialize', () => {
 			event('move.node', {
 				id: 'issue-1',
 				parent: 'swimlane-2',
-				rank: midRank(),
+				rank: rank(),
 			}),
 		);
 
@@ -143,7 +154,7 @@ describe('event materialize', () => {
 			event('close.issue', {
 				id: 'issue-1',
 				parent: CLOSED_SWIMLANE_ID,
-				rank: midRank(),
+				rank: rank(),
 			}),
 		);
 
@@ -157,7 +168,7 @@ describe('event materialize', () => {
 		const closeEvent = event('close.issue', {
 			id: 'issue-1',
 			parent: CLOSED_SWIMLANE_ID,
-			rank: midRank(),
+			rank: rank(),
 		});
 
 		expectOk(materialize(closeEvent));
@@ -221,13 +232,13 @@ describe('event materialize', () => {
 			event('init.workspace', {
 				id: 'workspace-1',
 				name: 'Workspace',
-				rank: midRank(),
+				rank: rank(),
 			}),
 			event('add.board', {
 				id: 'board-1',
 				name: 'Board',
 				parent: 'workspace-1',
-				rank: midRank(),
+				rank: rank(),
 			}),
 		] as const;
 

@@ -128,16 +128,6 @@ vi.mock('../../lib/repository/node-repo.js', () => ({
 	},
 }));
 
-vi.mock('../../lib/event/event-materialize-and-persist.js', () => ({
-	materializeAndPersistAll: vi.fn(() => [
-		{
-			result: 'success',
-			message: 'persisted',
-			data: null,
-		},
-	]),
-}));
-
 vi.mock('../../lib/event/common-events.js', () => ({
 	createIssueEvents: vi.fn(({name, parent, user}) => [
 		{

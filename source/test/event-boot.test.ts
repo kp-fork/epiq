@@ -11,7 +11,13 @@ import {
 } from '../lib/event/event-boot.js';
 import {AppEvent} from '../lib/event/event.model.js';
 import {CLOSED_BOARD_ID, CLOSED_SWIMLANE_ID} from '../lib/event/static-ids.js';
-import {midRank} from '../lib/utils/rank.js';
+import {bigIntToHex, midRank} from '../lib/utils/rank.js';
+
+const rank = () => {
+	const result = midRank();
+	if (isFail(result)) throw new Error(result.message);
+	return result.value;
+};
 
 vi.mock('../lib/event/event-persist.js', () => ({
 	persist: vi.fn(() => ({
@@ -54,12 +60,23 @@ const event = <A extends AppEvent['action']>(
 
 beforeEach(() => {
 	eventSeq = 0;
-	initWorkspaceState(nodes.workspace('test-root', 'Test Root'));
+
+	const rankResult = bigIntToHex(1n);
+	if (isFail(rankResult)) throw new Error(rankResult.message);
+
+	initWorkspaceState(
+		nodes.workspace('test-root', 'Test Root', rankResult.value),
+	);
 });
 
 describe('event boot', () => {
 	it('creates the default workspace events', () => {
-		const events = createDefaultEvents();
+		const result = createDefaultEvents();
+
+		expect(isFail(result)).toBe(false);
+		if (isFail(result)) return;
+
+		const events = result.value;
 
 		expect(events).toHaveLength(9);
 		expect(events.map(e => e.action)).toEqual([
@@ -74,10 +91,24 @@ describe('event boot', () => {
 			'lock.node',
 		]);
 
-		expect(events[5]?.payload.id).toBe(CLOSED_BOARD_ID);
-		expect(events[6]?.payload.id).toBe(CLOSED_SWIMLANE_ID);
-		expect(events[7]?.payload.id).toBe(CLOSED_BOARD_ID);
-		expect(events[8]?.payload.id).toBe(CLOSED_SWIMLANE_ID);
+		const closedBoardEvent = events[5];
+		const closedSwimlaneEvent = events[6];
+		const lockClosedBoardEvent = events[7];
+		const lockClosedSwimlaneEvent = events[8];
+
+		if (
+			closedBoardEvent?.action !== 'add.board' ||
+			closedSwimlaneEvent?.action !== 'add.swimlane' ||
+			lockClosedBoardEvent?.action !== 'lock.node' ||
+			lockClosedSwimlaneEvent?.action !== 'lock.node'
+		) {
+			throw new Error('Unexpected default event shape');
+		}
+
+		expect(closedBoardEvent.payload.id).toBe(CLOSED_BOARD_ID);
+		expect(closedSwimlaneEvent.payload.id).toBe(CLOSED_SWIMLANE_ID);
+		expect(lockClosedBoardEvent.payload.id).toBe(CLOSED_BOARD_ID);
+		expect(lockClosedSwimlaneEvent.payload.id).toBe(CLOSED_SWIMLANE_ID);
 	});
 
 	it('boots default state when event log has no workspace init event', () => {
@@ -104,19 +135,19 @@ describe('event boot', () => {
 			event('init.workspace', {
 				id: 'workspace-1',
 				name: 'Workspace',
-				rank: midRank(),
+				rank: rank(),
 			}),
 			event('add.board', {
 				id: 'board-1',
 				name: 'Board',
 				parent: 'workspace-1',
-				rank: midRank(),
+				rank: rank(),
 			}),
 			event('add.swimlane', {
 				id: 'swimlane-1',
 				name: 'Todo',
 				parent: 'board-1',
-				rank: midRank(),
+				rank: rank(),
 			}),
 		] as const;
 
@@ -134,19 +165,19 @@ describe('event boot', () => {
 			event('init.workspace', {
 				id: 'workspace-1',
 				name: 'Workspace',
-				rank: midRank(),
+				rank: rank(),
 			}),
 			event('add.board', {
 				id: 'board-1',
 				name: 'Board',
 				parent: 'workspace-1',
-				rank: midRank(),
+				rank: rank(),
 			}),
 			event('add.swimlane', {
 				id: 'swimlane-1',
 				name: 'Todo',
 				parent: 'board-1',
-				rank: midRank(),
+				rank: rank(),
 			}),
 		]);
 
@@ -163,13 +194,13 @@ describe('event boot', () => {
 			event('init.workspace', {
 				id: 'workspace-1',
 				name: 'Workspace',
-				rank: midRank(),
+				rank: rank(),
 			}),
 			event('add.board', {
 				id: 'board-1',
 				name: 'Board',
 				parent: 'workspace-1',
-				rank: midRank(),
+				rank: rank(),
 			}),
 		]);
 
@@ -209,7 +240,7 @@ describe('event boot', () => {
 			event('init.workspace', {
 				id: 'workspace-1',
 				name: 'Workspace',
-				rank: midRank(),
+				rank: rank(),
 			}),
 			event('edit.title', {
 				id: 'missing-node',
