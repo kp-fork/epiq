@@ -12,6 +12,7 @@ import {isFail} from './lib/model/result-types.js';
 import {patchSettingsState} from './lib/state/settings.state.js';
 import {resolveClosestEpiqRoot} from './lib/storage/paths.js';
 import './logger.js';
+import {AppEvent} from './lib/event/event.model.js';
 
 meow(
 	`${chalk.bold('Epiq CLI')}
@@ -23,10 +24,18 @@ ${chalk.dim('Boot in directory:')}
 	{
 		importMeta: import.meta,
 		flags: {
-			init: {type: 'string'},
+			init: {
+				type: 'boolean',
+				default: false,
+			},
 		},
 	},
 );
+
+type BootContext = {
+	hasEpiqRoot: boolean;
+	events: AppEvent[];
+};
 
 let width = process.stdout.columns || 120;
 let height = process.stdout.rows || 20;
@@ -45,31 +54,39 @@ const renderApp = () => {
 	renderNode(<App width={width} height={height} />);
 };
 
-const loadEventLogOrExit = () => {
+const loadBootContext = (): BootContext => {
 	const epiqRootDirResult = resolveClosestEpiqRoot(process.cwd());
-	if (isFail(epiqRootDirResult)) throw Error(epiqRootDirResult.message);
-	const result = loadMergedEvents(epiqRootDirResult.value);
 
-	if (isFail(result)) {
-		const noEventsFound = result.message.includes('No events found');
+	if (isFail(epiqRootDirResult)) {
+		logger.info('No .epiq directory found, starting in init mode');
+
+		return {
+			hasEpiqRoot: false,
+			events: [],
+		};
+	}
+
+	const eventsResult = loadMergedEvents(epiqRootDirResult.value);
+
+	if (isFail(eventsResult)) {
+		const noEventsFound = eventsResult.message.includes('No events found');
 
 		if (noEventsFound) {
 			logger.info('No events found, starting with empty state');
-			return [];
+
+			return {
+				hasEpiqRoot: true,
+				events: [],
+			};
 		}
 
-		throw new Error(result.message);
+		throw new Error(eventsResult.message);
 	}
 
-	return result.value;
-};
-
-const bootStateOrExit = (eventLog: ReturnType<typeof loadEventLogOrExit>) => {
-	const result = bootStateFromEventLog(eventLog);
-
-	if (isFail(result)) {
-		throw new Error(`Failed to boot state: ${result.message}`);
-	}
+	return {
+		hasEpiqRoot: true,
+		events: eventsResult.value,
+	};
 };
 
 async function bootApp() {
@@ -78,11 +95,16 @@ async function bootApp() {
 		patchSettingsState(settings.value);
 	}
 
-	await syncEpiqFromRemote();
+	const bootContext = loadBootContext();
 
-	const eventLog = loadEventLogOrExit();
+	if (bootContext.hasEpiqRoot) {
+		await syncEpiqFromRemote();
+	}
 
-	bootStateOrExit(eventLog);
+	const eventLogBootResult = bootStateFromEventLog(bootContext.events);
+	if (isFail(eventLogBootResult)) {
+		throw new Error(`Failed to boot state: ${eventLogBootResult.message}`);
+	}
 
 	renderApp();
 	initListeners();
