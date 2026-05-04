@@ -1,4 +1,18 @@
 import {ulid} from 'ulid';
+import {exportBoardLayout} from '../../export/export.js';
+import {syncEpiqWithRemote} from '../../git/sync.js';
+import {navigationUtils} from '../actions/default/navigation-action-utils.js';
+import {
+	captureNavigationAnchor,
+	restoreNavigationAnchor,
+} from '../actions/default/restore-navigation.js';
+import {
+	getMovePendingState,
+	moveChildWithinParent,
+	moveNodeToSiblingContainer,
+	setMovePendingState,
+} from '../actions/move/move-actions-utils.js';
+import {setConfig} from '../config/user-config.js';
 import {openEditorOnText} from '../editor/editor.js';
 import {createIssueEvents} from '../event/common-events.js';
 import {getEventTime} from '../event/date-utils.js';
@@ -14,20 +28,24 @@ import {
 import {materializeAll} from '../event/event-materialize.js';
 import {getPersistFileName, resolveActorId} from '../event/event-persist.js';
 import {AppEvent, MovePosition} from '../event/event.model.js';
-import {syncEpiqWithRemote} from '../../git/sync.js';
-import {findAncestor, nodeRepo} from '../repository/node-repo.js';
-import {navigationUtils} from '../actions/default/navigation-action-utils.js';
-import {
-	getMovePendingState,
-	moveChildWithinParent,
-	moveNodeToSiblingContainer,
-	resolveRankForMove,
-	setMovePendingState,
-} from '../actions/move/move-actions-utils.js';
-import {setConfig} from '../config/user-config.js';
+import {resolveReopenParentFromLog} from '../event/log-utils.js';
+import {CLOSED_SWIMLANE_ID} from '../event/static-ids.js';
 import {CommandLineActionEntry, Mode} from '../model/action-map.model.js';
 import {Filter, findInBreadCrumb} from '../model/app-state.model.js';
 import {isTicketNode} from '../model/context.model.js';
+import {
+	failed,
+	isFail,
+	Result,
+	resultStatuses,
+	succeeded,
+} from '../model/result-types.js';
+import {findAncestor, nodeRepo} from '../repository/node-repo.js';
+import {
+	getOrderedChildren,
+	resolveAndPersistRankForCreate,
+	resolveAndPersistRankForMove,
+} from '../repository/rank.js';
 import {getCmdArg, getCmdState, setCmdInput} from '../state/cmd.state.js';
 import {getSettingsState, patchSettingsState} from '../state/settings.state.js';
 import {
@@ -37,28 +55,12 @@ import {
 	resetState,
 	updateState,
 } from '../state/state.js';
+import {resolveClosestEpiqRoot} from '../storage/paths.js';
 import {CmdKeywords} from './cmd-keywords.js';
+import {cmdValidity} from './cmd-validity.js';
 import {CmdIntent} from './command-meta.js';
 import {getCmdModifiers} from './command-modifiers.js';
-import {
-	resultStatuses,
-	failed,
-	isFail,
-	succeeded,
-	Result,
-} from '../model/result-types.js';
-import {cmdValidity} from './cmd-validity.js';
 import {parsePeekDateInput} from './validate-date.js';
-import {resolveClosestEpiqRoot} from '../storage/paths.js';
-import {
-	captureNavigationAnchor,
-	restoreNavigationAnchor,
-} from '../actions/default/restore-navigation.js';
-import {exportBoardLayout} from '../../export/export.js';
-import {resolveCreateRank, resolveMoveRank} from '../repository/rank.js';
-import {getOrderedChildren} from '../repository/rank.js';
-import {resolveReopenParentFromLog} from '../event/log-utils.js';
-import {CLOSED_SWIMLANE_ID} from '../event/static-ids.js';
 
 const findTagByName = (name: string) =>
 	Object.values(getState().tags).find(tag => tag.name === name);
@@ -141,11 +143,12 @@ export const commands: CommandLineActionEntry[] = [
 						? {at: 'after', sibling: previousSibling.id}
 						: {at: 'start'};
 
-				const rankResult = resolveRankForMove({
-					id: targetNode.id,
-					parentId: targetNode.parentNodeId,
+				const rankResult = resolveAndPersistRankForMove(
+					targetNode.parentNodeId,
+					targetNode.id,
 					position,
-				});
+					userRes.value,
+				);
 
 				if (isFail(rankResult)) return rankResult;
 
@@ -357,11 +360,14 @@ export const commands: CommandLineActionEntry[] = [
 				return failed('Issue is already closed');
 			}
 
-			const rankResult = resolveMoveRank(
-				getOrderedChildren(closeSwimlane.id).filter(x => x.id !== target.id),
-				{at: 'end'},
+			const rankResult = resolveAndPersistRankForMove(
+				closeSwimlane.id,
+				target.id,
+				{
+					at: 'end',
+				},
+				userRes.value,
 			);
-
 			if (isFail(rankResult)) return rankResult;
 
 			const result = materializeAndPersist({
@@ -424,11 +430,14 @@ export const commands: CommandLineActionEntry[] = [
 			const previousParent = getState().nodes[previousParentId];
 			if (!previousParent) return failed('Previous parent no longer exists');
 
-			const rankResult = resolveMoveRank(
-				getOrderedChildren(previousParent.id).filter(x => x.id !== ticket.id),
-				{at: 'end'},
+			const rankResult = resolveAndPersistRankForMove(
+				previousParent.id,
+				ticket.id,
+				{
+					at: 'end',
+				},
+				userRes.value,
 			);
-
 			if (isFail(rankResult)) return rankResult;
 
 			const result = materializeAndPersist({
@@ -587,7 +596,10 @@ export const commands: CommandLineActionEntry[] = [
 				const workspace = nodeRepo.getNode<'WORKSPACE'>(rootNodeId);
 				if (!workspace) return failed('Workspace not found');
 
-				const rankResult = resolveCreateRank(workspace.id);
+				const rankResult = resolveAndPersistRankForCreate(
+					workspace.id,
+					userRes.value,
+				);
 				if (isFail(rankResult)) return rankResult;
 
 				return createAndNavigate({
@@ -608,7 +620,10 @@ export const commands: CommandLineActionEntry[] = [
 				if (isFail(boardResult))
 					return failed('Unable to add swimlane in this context');
 
-				const rankResult = resolveCreateRank(boardResult.value.id);
+				const rankResult = resolveAndPersistRankForCreate(
+					boardResult.value.id,
+					userRes.value,
+				);
 				if (isFail(rankResult)) return rankResult;
 
 				return createAndNavigate({
@@ -641,15 +656,21 @@ export const commands: CommandLineActionEntry[] = [
 					return failed('Unable to add issue in this context');
 				}
 
-				const rankResult = resolveCreateRank(swimlane.id);
+				const rankResult = resolveAndPersistRankForCreate(
+					swimlane.id,
+					userRes.value,
+				);
 				if (isFail(rankResult)) return rankResult;
 
-				const issueEvents = createIssueEvents({
+				const issueEventsResult = createIssueEvents({
 					name: cmdState.inputString,
 					parent: swimlane.id,
 					rank: rankResult.value,
 					user: userRes.value,
 				});
+				if (isFail(issueEventsResult)) return issueEventsResult;
+
+				const issueEvents = issueEventsResult.value;
 
 				const issueResults = materializeAndPersistAll(issueEvents);
 
@@ -668,7 +689,12 @@ export const commands: CommandLineActionEntry[] = [
 				if (!issueResult || isFail(issueResult))
 					return failed('Issue creation failed');
 
-				const ticketId = issueEvents[0]?.payload.id;
+				const issueEvent = issueEvents.find(
+					(event): event is AppEvent<'add.issue'> =>
+						event.action === 'add.issue',
+				);
+
+				const ticketId = issueEvent?.payload.id;
 				if (!ticketId) return failed('Unable to determine ticket id');
 
 				navigationUtils.navigate({
@@ -828,6 +854,12 @@ export const commands: CommandLineActionEntry[] = [
 
 			if (alreadyTagged) return failed('Already tagged with that tag');
 
+			const rankResult = resolveAndPersistRankForCreate(
+				tagsField.id,
+				userRes.value,
+			);
+			if (isFail(rankResult)) return rankResult;
+
 			return materializeAndPersist({
 				id: ulid(),
 				action: 'tag.issue',
@@ -835,6 +867,7 @@ export const commands: CommandLineActionEntry[] = [
 					id: ulid(),
 					target: ticket.id,
 					tagId,
+					rank: rankResult.value,
 				},
 				...userRes.value,
 			});
@@ -893,6 +926,12 @@ export const commands: CommandLineActionEntry[] = [
 
 			if (alreadyAssigned) return failed('Assignee already assigned');
 
+			const rankResult = resolveAndPersistRankForCreate(
+				assigneesField.id,
+				userRes.value,
+			);
+			if (isFail(rankResult)) return rankResult;
+
 			return materializeAndPersist({
 				id: ulid(),
 				action: 'assign.issue',
@@ -900,6 +939,7 @@ export const commands: CommandLineActionEntry[] = [
 					id: ulid(),
 					target: ticket.id,
 					contributor: contributorId,
+					rank: rankResult.value,
 				},
 				...userRes.value,
 			});

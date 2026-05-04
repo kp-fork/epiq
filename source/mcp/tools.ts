@@ -1,6 +1,5 @@
 import {ulid} from 'ulid';
 import {syncEpiqWithRemote} from '../git/sync.js';
-import {resolveRankForMove} from '../lib/actions/move/move-actions-utils.js';
 import {loadSettingsFromConfig} from '../lib/config/user-config.js';
 import {createIssueEvents} from '../lib/event/common-events.js';
 import {bootStateFromEventLog} from '../lib/event/event-boot.js';
@@ -12,13 +11,17 @@ import {CLOSED_SWIMLANE_ID} from '../lib/event/static-ids.js';
 import {isTicketNode, Ticket} from '../lib/model/context.model.js';
 import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
 import {nodeRepo} from '../lib/repository/node-repo.js';
+import {
+	resolveAndPersistRankForCreate,
+	resolveAndPersistRankForMove,
+} from '../lib/repository/rank.js';
 import {getRenderedChildren, getState} from '../lib/state/state.js';
 import {resolveClosestEpiqRoot} from '../lib/storage/paths.js';
 import {sanitizeInlineText} from '../lib/utils/string.utils.js';
 import {getFieldValue} from '../lib/utils/ticket.utils.js';
-import {midRank} from '../lib/utils/rank.js';
 
 type SyncInput = ToolInput;
+
 type MoveIssueInput = ToolInput & {
 	issueId: string;
 	parentId: string;
@@ -102,31 +105,25 @@ const getIssueTags = (ticket: Ticket) =>
 	getReferencedIds(ticket, 'Tags')
 		.map(tagId => nodeRepo.getTag(tagId))
 		.filter(tag => tag != undefined)
-		.map(tag => ({
-			id: tag.id,
-			name: tag.name,
-		}));
+		.map(tag => ({id: tag.id, name: tag.name}));
 
 const getIssueAssignees = (ticket: Ticket) =>
 	getReferencedIds(ticket, 'Assignees')
-		.map(contributorId => nodeRepo.getContributor(contributorId))
-		.filter(contributor => contributor != undefined)
-		.map(contributor => ({
-			id: contributor.id,
-			name: contributor.name,
-		}));
+		.map(id => nodeRepo.getContributor(id))
+		.filter(Boolean)
+		.map(c => ({id: c!.id, name: c!.name}));
 
 export const listBoards = (input: ToolInput = {}) => {
 	const bootResult = boot(input.repoRoot);
 	if (isFail(bootResult)) return bootResult;
 
 	const boards = Object.values(getState().nodes)
-		.filter(node => node.context === 'BOARD')
-		.map(node => ({
-			id: node.id,
-			title: node.title,
-			parentId: node.parentNodeId,
-			readonly: Boolean(node.readonly),
+		.filter(n => n.context === 'BOARD')
+		.map(n => ({
+			id: n.id,
+			title: n.title,
+			parentId: n.parentNodeId,
+			readonly: Boolean(n.readonly),
 		}));
 
 	return succeeded('Listed boards', boards);
@@ -137,14 +134,14 @@ export const listSwimlanes = (input: ListSwimlanesInput = {}) => {
 	if (isFail(bootResult)) return bootResult;
 
 	const swimlanes = Object.values(getState().nodes)
-		.filter(node => node.context === 'SWIMLANE')
-		.filter(node => !input.boardId || node.parentNodeId === input.boardId)
-		.map(node => ({
-			id: node.id,
-			title: node.title,
-			boardId: node.parentNodeId,
-			isClosed: node.id === CLOSED_SWIMLANE_ID,
-			readonly: Boolean(node.readonly),
+		.filter(n => n.context === 'SWIMLANE')
+		.filter(n => !input.boardId || n.parentNodeId === input.boardId)
+		.map(n => ({
+			id: n.id,
+			title: n.title,
+			boardId: n.parentNodeId,
+			isClosed: n.id === CLOSED_SWIMLANE_ID,
+			readonly: Boolean(n.readonly),
 		}));
 
 	return succeeded('Listed swimlanes', swimlanes);
@@ -156,18 +153,16 @@ export const listIssues = (input: ListIssuesInput) => {
 
 	const issues = Object.values(getState().nodes)
 		.filter(isTicketNode)
-		.filter(
-			node => input.includeClosed || node.parentNodeId !== CLOSED_SWIMLANE_ID,
-		)
-		.map(node => ({
-			id: node.id,
-			title: sanitizeInlineText(node.title),
-			description: getFieldValue(node, 'Description'),
-			parentId: node.parentNodeId,
-			isClosed: node.parentNodeId === CLOSED_SWIMLANE_ID,
-			readonly: Boolean(node.readonly),
-			tags: getIssueTags(node),
-			assignees: getIssueAssignees(node),
+		.filter(n => input.includeClosed || n.parentNodeId !== CLOSED_SWIMLANE_ID)
+		.map(n => ({
+			id: n.id,
+			title: sanitizeInlineText(n.title),
+			description: getFieldValue(n, 'Description'),
+			parentId: n.parentNodeId,
+			isClosed: n.parentNodeId === CLOSED_SWIMLANE_ID,
+			readonly: Boolean(n.readonly),
+			tags: getIssueTags(n),
+			assignees: getIssueAssignees(n),
 		}));
 
 	return succeeded('Listed issues', issues);
@@ -180,29 +175,28 @@ export const createIssue = (input: CreateIssueInput) => {
 	const actorResult = getActor();
 	if (isFail(actorResult)) return actorResult;
 
-	const parent = nodeRepo.getNode(input.parentId);
-	if (!parent) {
-		return failed(`Unable to locate parent swimlane: ${input.parentId}`);
-	}
+	const rankResult = resolveAndPersistRankForCreate(
+		input.parentId,
+		actorResult.value,
+	);
+	if (isFail(rankResult)) return rankResult;
 
-	if (parent.context !== 'SWIMLANE') {
-		return failed(`Parent must be a swimlane, got: ${parent.context}`);
-	}
-
-	const issueEvents = createIssueEvents({
+	const issueEventsResult = createIssueEvents({
 		name: input.title,
 		parent: input.parentId,
 		user: actorResult.value,
-		rank: midRank(),
+		rank: rankResult.value,
 	});
+
+	if (isFail(issueEventsResult)) return issueEventsResult;
+
+	const issueEvents = issueEventsResult.value;
 
 	const results = materializeAndPersistAll(issueEvents);
 	const failure = results.find(isFail);
 	if (failure) return failed(failure.message);
 
-	const issueId = issueEvents.find(event => event.action === 'add.issue')
-		?.payload.id;
-
+	const issueId = issueEvents.find(e => e.action === 'add.issue')?.payload.id;
 	if (!issueId) return failed('Unable to determine created issue id');
 
 	return succeeded('Created issue', {
@@ -219,31 +213,17 @@ export const closeIssue = (input: CloseIssueInput) => {
 	const actorResult = getActor();
 	if (isFail(actorResult)) return actorResult;
 
-	const issue = nodeRepo.getNode(input.issueId);
-	if (!issue) return failed(`Unable to locate issue: ${input.issueId}`);
-
-	if (!issue.parentNodeId) {
-		return failed(`Unable to locate issue parent for: ${input.issueId}`);
-	}
-
-	if (!isTicketNode(issue)) return failed('Can only close issues');
-
-	if (issue.parentNodeId === CLOSED_SWIMLANE_ID) {
-		return failed('Issue is already closed');
-	}
-
-	const rankResult = resolveRankForMove({
-		id: input.issueId,
-		parentId: CLOSED_SWIMLANE_ID,
-		position: {at: 'end'},
-	});
-
+	const rankResult = resolveAndPersistRankForMove(
+		CLOSED_SWIMLANE_ID,
+		input.issueId,
+		{at: 'end'},
+		actorResult.value,
+	);
 	if (isFail(rankResult)) return rankResult;
 
 	const event = {
 		id: ulid(),
-		userId: actorResult.value.userId,
-		userName: actorResult.value.userName,
+		...actorResult.value,
 		action: 'close.issue',
 		payload: {
 			id: input.issueId,
@@ -256,24 +236,7 @@ export const closeIssue = (input: CloseIssueInput) => {
 	const failure = results.find(isFail);
 	if (failure) return failed(failure.message);
 
-	return succeeded('Closed issue', {
-		id: input.issueId,
-		closed: true,
-	});
-};
-
-export const getEpiqState = (input: ToolInput = {}) => {
-	const bootResult = boot(input.repoRoot);
-	if (isFail(bootResult)) return bootResult;
-
-	return succeeded('Retrieved Epiq state', {
-		root: bootResult.value.root,
-		nodes: getState().nodes,
-		rootNodeId: getState().rootNodeId,
-		currentNode: getState().currentNode,
-		selectedIndex: getState().selectedIndex,
-		eventLog: getState().eventLog,
-	});
+	return succeeded('Closed issue', {id: input.issueId});
 };
 
 export const moveIssue = (input: MoveIssueInput) => {
@@ -283,37 +246,17 @@ export const moveIssue = (input: MoveIssueInput) => {
 	const actorResult = getActor();
 	if (isFail(actorResult)) return actorResult;
 
-	const issue = nodeRepo.getNode(input.issueId);
-	if (!issue) return failed(`Unable to locate issue: ${input.issueId}`);
-	if (!isTicketNode(issue)) return failed('Can only move issues');
-
-	const parent = nodeRepo.getNode(input.parentId);
-	if (!parent) {
-		return failed(`Unable to locate target swimlane: ${input.parentId}`);
-	}
-
-	if (parent.context !== 'SWIMLANE') {
-		return failed(`Target parent must be a swimlane, got: ${parent.context}`);
-	}
-
-	if (parent.readonly) {
-		return failed('Cannot move issue to readonly swimlane');
-	}
-
-	const position = input.position ?? {at: 'end'};
-
-	const rankResult = resolveRankForMove({
-		id: input.issueId,
-		parentId: input.parentId,
-		position,
-	});
-
+	const rankResult = resolveAndPersistRankForMove(
+		input.parentId,
+		input.issueId,
+		input.position ?? {at: 'end'},
+		actorResult.value,
+	);
 	if (isFail(rankResult)) return rankResult;
 
 	const event = {
 		id: ulid(),
-		userId: actorResult.value.userId,
-		userName: actorResult.value.userName,
+		...actorResult.value,
 		action: 'move.node',
 		payload: {
 			id: input.issueId,
@@ -329,27 +272,35 @@ export const moveIssue = (input: MoveIssueInput) => {
 	return succeeded('Moved issue', {
 		id: input.issueId,
 		parentId: input.parentId,
-		position: input.position ?? {at: 'end'},
 	});
 };
 
 export const sync = async (input: SyncInput = {}) => {
-	const epiqRootResult = resolveClosestEpiqRoot(
-		input.repoRoot ?? process.cwd(),
-	);
-	if (isFail(epiqRootResult)) return failed('Sync failed \n' + epiqRootResult);
+	const root = resolveClosestEpiqRoot(input.repoRoot ?? process.cwd());
+	if (isFail(root)) return failed('Sync failed');
 
-	const actorResult = getActor();
-	if (isFail(actorResult)) return actorResult;
+	const actor = getActor();
+	if (isFail(actor)) return actor;
 
 	const result = await syncEpiqWithRemote({
-		cwd: epiqRootResult.value,
-		ownEventFileName: getPersistFileName({
-			userId: actorResult.value.userId,
-			userName: actorResult.value.userName,
-		}),
+		cwd: root.value,
+		ownEventFileName: getPersistFileName(actor.value),
 	});
-	if (isFail(result)) return result;
 
-	return succeeded('Synced Epiq state', result.value);
+	if (isFail(result)) return result;
+	return succeeded('Synced', result.value);
+};
+
+export const getEpiqState = (input: ToolInput = {}) => {
+	const bootResult = boot(input.repoRoot);
+	if (isFail(bootResult)) return bootResult;
+
+	return succeeded('Retrieved Epiq state', {
+		root: bootResult.value.root,
+		nodes: getState().nodes,
+		rootNodeId: getState().rootNodeId,
+		currentNode: getState().currentNode,
+		selectedIndex: getState().selectedIndex,
+		eventLog: getState().eventLog,
+	});
 };

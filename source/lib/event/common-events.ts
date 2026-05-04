@@ -1,7 +1,8 @@
 import {monotonicFactory, ulid} from 'ulid';
-import {AppEvent} from './event.model.js';
+import {isFail, Result, succeeded} from '../model/result-types.js';
 import {User} from '../state/settings.state.js';
 import {midRank, rankBetween} from '../utils/rank.js';
+import {AppEvent} from './event.model.js';
 
 const nextId = monotonicFactory();
 
@@ -15,17 +16,22 @@ export const createIssueEvents = ({
 	parent: string;
 	rank: string;
 	user: User;
-}): readonly AppEvent[] => {
+}): Result<readonly AppEvent[]> => {
 	const issueId = nextId();
 	const descriptionId = nextId();
 	const assigneesId = nextId();
 	const tagsId = nextId();
 
 	const descriptionRank = midRank();
-	const assigneesRank = rankBetween(descriptionRank, undefined);
-	const tagsRank = rankBetween(assigneesRank, undefined);
+	if (isFail(descriptionRank)) return descriptionRank;
 
-	return [
+	const assigneesRank = rankBetween(descriptionRank.value, undefined);
+	if (isFail(assigneesRank)) return assigneesRank;
+
+	const tagsRank = rankBetween(assigneesRank.value, undefined);
+	if (isFail(tagsRank)) return tagsRank;
+
+	return succeeded('Created issue events', [
 		{
 			id: ulid(),
 			userId,
@@ -48,7 +54,7 @@ export const createIssueEvents = ({
 				parent: issueId,
 				name: 'Description',
 				val: '',
-				rank: descriptionRank,
+				rank: descriptionRank.value,
 			},
 		},
 		{
@@ -60,7 +66,7 @@ export const createIssueEvents = ({
 				id: assigneesId,
 				parent: issueId,
 				name: 'Assignees',
-				rank: assigneesRank,
+				rank: assigneesRank.value,
 			},
 		},
 		{
@@ -72,8 +78,8 @@ export const createIssueEvents = ({
 				id: tagsId,
 				parent: issueId,
 				name: 'Tags',
-				rank: tagsRank,
+				rank: tagsRank.value,
 			},
 		},
-	] satisfies readonly AppEvent[];
+	] satisfies readonly AppEvent[]);
 };

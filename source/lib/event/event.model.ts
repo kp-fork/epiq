@@ -75,6 +75,7 @@ export type AppEventMap = {
 		payload: PayloadBase & {
 			contributor: string;
 			target: string;
+			rank: string;
 		};
 		result: NavNode<'FIELD'>;
 	};
@@ -91,6 +92,7 @@ export type AppEventMap = {
 		payload: PayloadBase & {
 			tagId: string;
 			target: string;
+			rank: string;
 		};
 		result: NavNode<'FIELD'>;
 	};
@@ -128,6 +130,14 @@ export type AppEventMap = {
 	'lock.node': {
 		payload: PayloadBase;
 		result: {id: string};
+	};
+
+	'rebalance.children': {
+		payload: {
+			parent: string;
+			ranks: Record<string, string>;
+		};
+		result: {parent: string};
 	};
 };
 

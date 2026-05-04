@@ -1,7 +1,9 @@
 import {ulid} from 'ulid';
 import {materialize} from '../../event/event-materialize.js';
 import {resolveActorId} from '../../event/event-persist.js';
-import {resolveMoveRank} from '../../repository/rank.js';
+import {AppEvent, MovePosition} from '../../event/event.model.js';
+import {AnyContext} from '../../model/context.model.js';
+import {NavNode} from '../../model/navigation-node.model.js';
 import {
 	failed,
 	isFail,
@@ -9,11 +11,12 @@ import {
 	ReturnSuccess,
 	succeeded,
 } from '../../model/result-types.js';
-import {AnyContext} from '../../model/context.model.js';
-import {NavNode} from '../../model/navigation-node.model.js';
+import {
+	getOrderedChildren,
+	resolveAndPersistRankForMove,
+	resolveMoveRank,
+} from '../../repository/rank.js';
 import {getRenderedChildren, getState} from '../../state/state.js';
-import {AppEvent, MovePosition} from '../../event/event.model.js';
-import {getOrderedChildren} from '../../repository/rank.js';
 
 let pendingMoveState: AppEvent<'move.node'> | null = null;
 
@@ -50,7 +53,7 @@ export const resolveRankForMove = ({
 const createPendingMoveState = ({
 	id,
 	parentId,
-	position,
+	position = {at: 'end'},
 }: {
 	id: string;
 	parentId: string;
@@ -59,7 +62,12 @@ const createPendingMoveState = ({
 	const userIdRes = resolveActorId();
 	if (isFail(userIdRes)) return failed('Unable to resolve user ID');
 
-	const rankResult = resolveRankForMove({id, parentId, position});
+	const rankResult = resolveAndPersistRankForMove(
+		parentId,
+		id,
+		position,
+		userIdRes.value,
+	);
 	if (isFail(rankResult)) return rankResult;
 
 	return succeeded('Created pending move state', {

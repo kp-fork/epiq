@@ -28,9 +28,26 @@ vi.mock('../lib/repository/node-repo.js', () => ({
 	},
 }));
 
-vi.mock('../lib/repository/rank.js', () => ({
-	getOrderedChildren: vi.fn(),
-}));
+vi.mock('../lib/repository/rank.js', async importOriginal => {
+	const actual = await importOriginal<
+		typeof import('../lib/repository/rank.js')
+	>();
+
+	return {
+		...actual,
+		resolveRankForParent: vi.fn(() => succeeded('Resolved rank', 'm0')),
+		resolveCreateRank: vi.fn(() =>
+			succeeded('Resolved rank', {
+				rank: 'm0',
+				needsRebalance: false,
+			}),
+		),
+		resolveAndPersistRankForCreate: vi.fn(() =>
+			succeeded('Resolved rank', 'm0'),
+		),
+		resolveAndPersistRankForMove: vi.fn(() => succeeded('Resolved rank', 'm0')),
+	};
+});
 
 vi.mock('../lib/state/cmd.state.js', () => ({
 	getCmdArg: vi.fn(),
@@ -133,6 +150,7 @@ describe('TagTicket command', () => {
 				id: 'tag-assignment-node-id',
 				target: 'ticket-1',
 				tagId: 'tag-123',
+				rank: 'm0',
 			},
 		});
 	});
@@ -180,6 +198,7 @@ describe('TagTicket command', () => {
 				id: 'new-tag-assignment-node-id',
 				target: 'ticket-1',
 				tagId: 'new-tag-id',
+				rank: 'm0',
 			},
 		});
 	});
@@ -226,6 +245,7 @@ describe('TagTicket command', () => {
 				id: 'tag-assignment-node-id',
 				target: 'ticket-99',
 				tagId: 'tag-123',
+				rank: 'm0',
 			},
 		});
 	});
@@ -335,6 +355,7 @@ describe('AssignUserToTicket command', () => {
 				id: 'assignment-node-id',
 				target: 'ticket-1',
 				contributor: 'user-123',
+				rank: 'm0',
 			},
 		});
 	});
@@ -382,6 +403,7 @@ describe('AssignUserToTicket command', () => {
 				id: 'new-assignment-node-id',
 				target: 'ticket-1',
 				contributor: 'new-contributor-id',
+				rank: 'm0',
 			},
 		});
 	});

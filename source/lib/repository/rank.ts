@@ -1,38 +1,64 @@
+import {createRebalanceChildrenEvent} from '../event/create-rebalance-children-event.js';
+import {materializeAndPersist} from '../event/event-materialize-and-persist.js';
 import {MovePosition} from '../event/event.model.js';
+import {AnyContext} from '../model/context.model.js';
+import {NavNode} from '../model/navigation-node.model.js';
 import {
 	failed,
+	isFail,
 	Result,
 	ReturnFail,
 	ReturnSuccess,
 	succeeded,
 } from '../model/result-types.js';
-import {AnyContext} from '../model/context.model.js';
-import {NavNode} from '../model/navigation-node.model.js';
-import {midRank, rankBetween} from '../utils/rank.js';
 import {getState} from '../state/state.js';
+import {rankBetween} from '../utils/rank.js';
 
-export const resolveCreateRank = (parentId: string): Result<string> =>
+export type ResolveRankResult = {
+	rank: string;
+	needsRebalance: boolean;
+};
+
+export const resolveCreateRank = (
+	parentId: string,
+): Result<ResolveRankResult> =>
 	resolveMoveRank(getOrderedChildren(parentId), {at: 'end'});
 
 export const resolveMoveRank = (
 	siblings: NavNode<AnyContext>[],
 	position: MovePosition = {at: 'end'},
-): ReturnSuccess<string> | ReturnFail => {
+): ReturnSuccess<ResolveRankResult> | ReturnFail => {
+	const finish = (rankResult: Result<string>) => {
+		if (isFail(rankResult)) {
+			return succeeded('Rank space exhausted', {
+				rank: '',
+				needsRebalance: true,
+			});
+		}
+
+		return succeeded('Resolved rank', {
+			rank: rankResult.value,
+			needsRebalance: false,
+		});
+	};
+
 	if (siblings.length === 0) {
-		return succeeded('Resolved rank', midRank());
+		return finish(rankBetween(undefined, undefined));
 	}
 
 	switch (position.at) {
 		case 'start': {
 			const first = siblings[0];
 			if (!first) return failed('Unable to resolve first sibling');
-			return succeeded('Resolved rank', rankBetween(undefined, first.rank));
+
+			return finish(rankBetween(undefined, first.rank));
 		}
 
 		case 'end': {
 			const last = siblings[siblings.length - 1];
 			if (!last) return failed('Unable to resolve last sibling');
-			return succeeded('Resolved rank', rankBetween(last.rank, undefined));
+
+			return finish(rankBetween(last.rank, undefined));
 		}
 
 		case 'before': {
@@ -43,7 +69,8 @@ export const resolveMoveRank = (
 			const next = siblings[idx];
 
 			if (!next) return failed('Sibling not found');
-			return succeeded('Resolved rank', rankBetween(prev?.rank, next.rank));
+
+			return finish(rankBetween(prev?.rank, next.rank));
 		}
 
 		case 'after': {
@@ -54,10 +81,12 @@ export const resolveMoveRank = (
 			const next = idx < siblings.length - 1 ? siblings[idx + 1] : undefined;
 
 			if (!prev) return failed('Sibling not found');
-			return succeeded('Resolved rank', rankBetween(prev.rank, next?.rank));
+
+			return finish(rankBetween(prev.rank, next?.rank));
 		}
 	}
 };
+
 export const getOrderedChildren = (parentId: string) => {
 	return Object.values(getState().nodes)
 		.filter(
@@ -71,3 +100,89 @@ export const getSiblingIndex = (
 	siblings: NavNode<AnyContext>[],
 	sibling: string,
 ) => siblings.findIndex(node => node.id === sibling);
+
+export const resolveRankForParent = (
+	id: string,
+	parentId: string,
+	position: MovePosition = {at: 'end'},
+): Result<ResolveRankResult> =>
+	resolveMoveRank(
+		getOrderedChildren(parentId).filter(node => node.id !== id),
+		position,
+	);
+
+/**
+ * Resolves a rank for moving/repositioning an existing child.
+ *
+ * Side effect warning:
+ * If the target parent has no available rank space, this function will create,
+ * materialize, and persist a `rebalance.children` event before retrying.
+ *
+ * Use only from command/API layers where writing additional events is allowed.
+ * Do not call from materializers or pure read paths.
+ */
+export const resolveAndPersistRankForMove = (
+	parentId: string,
+	nodeId: string,
+	position: MovePosition,
+	user: {userId: string; userName: string},
+): Result<string> => {
+	const first = resolveRankForParent(nodeId, parentId, position);
+	if (isFail(first)) return first;
+
+	if (!first.value.needsRebalance) {
+		return succeeded('Resolved rank', first.value.rank);
+	}
+
+	const rebalanceEvent = createRebalanceChildrenEvent(parentId, user);
+	if (isFail(rebalanceEvent)) return rebalanceEvent;
+
+	const rebalanceResult = materializeAndPersist(rebalanceEvent.value);
+	if (isFail(rebalanceResult)) return rebalanceResult;
+
+	const second = resolveRankForParent(nodeId, parentId, position);
+	if (isFail(second)) return second;
+
+	if (second.value.needsRebalance) {
+		return failed('Rank rebalance failed to create space');
+	}
+
+	return succeeded('Resolved rank after rebalance', second.value.rank);
+};
+
+/**
+ * Resolves a rank for creating a new child at the end of a parent.
+ *
+ * Side effect warning:
+ * If the target parent has no available rank space, this function will create,
+ * materialize, and persist a `rebalance.children` event before retrying.
+ *
+ * Use only from command/API layers where writing additional events is allowed.
+ * Do not call from materializers or pure read paths.
+ */
+export const resolveAndPersistRankForCreate = (
+	parentId: string,
+	user: {userId: string; userName: string},
+): Result<string> => {
+	const first = resolveCreateRank(parentId);
+	if (isFail(first)) return first;
+
+	if (!first.value.needsRebalance) {
+		return succeeded('Resolved rank', first.value.rank);
+	}
+
+	const rebalanceEvent = createRebalanceChildrenEvent(parentId, user);
+	if (isFail(rebalanceEvent)) return rebalanceEvent;
+
+	const rebalanceResult = materializeAndPersist(rebalanceEvent.value);
+	if (isFail(rebalanceResult)) return rebalanceResult;
+
+	const second = resolveCreateRank(parentId);
+	if (isFail(second)) return second;
+
+	if (second.value.needsRebalance) {
+		return failed('Rank rebalance failed to create space');
+	}
+
+	return succeeded('Resolved rank after rebalance', second.value.rank);
+};

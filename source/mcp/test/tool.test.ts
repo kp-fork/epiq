@@ -1,5 +1,10 @@
 import {beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
-import {isFail, Result} from '../../lib/model/result-types.js';
+import {
+	failed,
+	isFail,
+	Result,
+	succeeded,
+} from '../../lib/model/result-types.js';
 
 vi.mock('../../lib/storage/paths.js', async importOriginal => {
 	const actual = await importOriginal<
@@ -61,6 +66,23 @@ vi.mock('../../lib/event/event-materialize-and-persist.js', () => ({
 	]),
 }));
 
+vi.mock('../../lib/repository/rank.js', () => ({
+	resolveAndPersistRankForCreate: vi.fn((parentId: string) => {
+		if (parentId === 'missing') {
+			return failed('Unable to locate parent swimlane: missing');
+		}
+
+		return succeeded('Resolved rank', 'm0');
+	}),
+	resolveAndPersistRankForMove: vi.fn((parentId: string) => {
+		if (parentId === 'readonly-swimlane') {
+			return failed('Cannot move issue to readonly swimlane');
+		}
+
+		return succeeded('Resolved rank', 'm0');
+	}),
+}));
+
 const nodes: Record<string, any> = {
 	'board-1': {
 		id: 'board-1',
@@ -68,6 +90,8 @@ const nodes: Record<string, any> = {
 		context: 'BOARD',
 		parentNodeId: 'workspace-1',
 		readonly: false,
+		isDeleted: false,
+		rank: 'a0',
 	},
 	'swimlane-1': {
 		id: 'swimlane-1',
@@ -75,6 +99,8 @@ const nodes: Record<string, any> = {
 		context: 'SWIMLANE',
 		parentNodeId: 'board-1',
 		readonly: false,
+		isDeleted: false,
+		rank: 'a0',
 	},
 	'swimlane-2': {
 		id: 'swimlane-2',
@@ -82,6 +108,8 @@ const nodes: Record<string, any> = {
 		context: 'SWIMLANE',
 		parentNodeId: 'board-1',
 		readonly: false,
+		isDeleted: false,
+		rank: 'b0',
 	},
 	'readonly-swimlane': {
 		id: 'readonly-swimlane',
@@ -89,6 +117,8 @@ const nodes: Record<string, any> = {
 		context: 'SWIMLANE',
 		parentNodeId: 'board-1',
 		readonly: true,
+		isDeleted: false,
+		rank: 'c0',
 	},
 	'issue-1': {
 		id: 'issue-1',
@@ -96,12 +126,17 @@ const nodes: Record<string, any> = {
 		context: 'TICKET',
 		parentNodeId: 'swimlane-1',
 		readonly: false,
+		isDeleted: false,
+		rank: 'a0',
 	},
 	'field-description': {
 		id: 'field-description',
 		title: 'Description',
 		context: 'FIELD',
 		parentNodeId: 'issue-1',
+		readonly: false,
+		isDeleted: false,
+		rank: 'a0',
 		props: {value: 'A bug description'},
 	},
 };
@@ -116,7 +151,10 @@ vi.mock('../../lib/state/state.js', () => ({
 	}),
 	getRenderedChildren: (id: string) => {
 		if (id === 'issue-1') return [nodes['field-description']];
-		return Object.values(nodes).filter(node => node.parentNodeId === id);
+
+		return Object.values(nodes).filter(
+			node => !node.isDeleted && node.parentNodeId === id,
+		);
 	},
 }));
 
@@ -128,30 +166,23 @@ vi.mock('../../lib/repository/node-repo.js', () => ({
 	},
 }));
 
-vi.mock('../../lib/event/event-materialize-and-persist.js', () => ({
-	materializeAndPersistAll: vi.fn(() => [
-		{
-			result: 'success',
-			message: 'persisted',
-			data: null,
-		},
-	]),
-}));
-
 vi.mock('../../lib/event/common-events.js', () => ({
-	createIssueEvents: vi.fn(({name, parent, user}) => [
-		{
-			id: 'event-create-1',
-			userId: user.userId,
-			userName: user.userName,
-			action: 'add.issue',
-			payload: {
-				id: 'issue-created-1',
-				name,
-				parent,
+	createIssueEvents: vi.fn(({name, parent, user, rank}) =>
+		succeeded('Created issue events', [
+			{
+				id: 'event-create-1',
+				userId: user.userId,
+				userName: user.userName,
+				action: 'add.issue',
+				payload: {
+					id: 'issue-created-1',
+					name,
+					parent,
+					rank,
+				},
 			},
-		},
-	]),
+		]),
+	),
 }));
 
 let tools: typeof import('../tools.js');
@@ -262,7 +293,6 @@ describe('mcp tools', () => {
 		if (!isFail(result)) {
 			expect(result.value).toEqual({
 				id: 'issue-1',
-				closed: true,
 			});
 		}
 	});
@@ -280,7 +310,6 @@ describe('mcp tools', () => {
 			expect(result.value).toEqual({
 				id: 'issue-1',
 				parentId: 'swimlane-2',
-				position: {at: 'start'},
 			});
 		}
 

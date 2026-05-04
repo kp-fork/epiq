@@ -8,6 +8,7 @@ import {theme} from '../theme/themes.js';
 import {truncateWithEllipsis} from '../utils/string.utils.js';
 import {CursorUI} from './Cursor.js';
 import {ScrollBoxUI} from './ScrollBox.js';
+import {bigIntToHex} from '../utils/rank.js';
 
 type Props = {
 	id: string;
@@ -37,15 +38,20 @@ export const InlineEditor: React.FC<Props> = ({
 		const createdIds: string[] = [];
 
 		rows.forEach((row, idx) => {
+			const rankResult = bigIntToHex(BigInt(idx + 1));
+
+			if (!isSuccess(rankResult)) return;
+
 			const node = nodes.text({
-				id: `${idx}`,
+				id: `${id}-${idx}`,
 				name: `Line ${idx + 1}`,
 				parentNodeId: id,
+				rank: rankResult.value,
 				props: {value: row},
 				readonly: true,
 			});
 
-			const result = nodeRepo.createNodeAtPosition(node);
+			const result = nodeRepo.createNode(node);
 			if (isSuccess(result)) {
 				createdIds.push(result.value.id);
 			}

@@ -64,7 +64,7 @@ export function navigateToInitialNode() {
 	navigationUtils.navigate(navigationTarget);
 }
 
-export function createDefaultEvents(): readonly AppEvent[] {
+export function createDefaultEvents(): Result<readonly AppEvent[]> {
 	const workspaceId = nextId();
 	const boardId = nextId();
 	const swimlaneId1 = nextId();
@@ -72,23 +72,37 @@ export function createDefaultEvents(): readonly AppEvent[] {
 	const swimlaneId3 = nextId();
 
 	const workspaceRank = rankBetween(undefined, undefined);
+	if (isFail(workspaceRank)) return workspaceRank;
 
 	const defaultBoardRank = rankBetween(undefined, undefined);
-	const closedBoardRank = rankBetween(defaultBoardRank, undefined);
+	if (isFail(defaultBoardRank)) return defaultBoardRank;
+
+	const closedBoardRank = rankBetween(defaultBoardRank.value, undefined);
+	if (isFail(closedBoardRank)) return closedBoardRank;
 
 	const todoRank = rankBetween(undefined, undefined);
-	const inProgressRank = rankBetween(todoRank, undefined);
-	const doneRank = rankBetween(inProgressRank, undefined);
+	if (isFail(todoRank)) return todoRank;
+
+	const inProgressRank = rankBetween(todoRank.value, undefined);
+	if (isFail(inProgressRank)) return inProgressRank;
+
+	const doneRank = rankBetween(inProgressRank.value, undefined);
+	if (isFail(doneRank)) return doneRank;
 
 	const closedSwimlaneRank = rankBetween(undefined, undefined);
+	if (isFail(closedSwimlaneRank)) return closedSwimlaneRank;
 
-	return [
+	return succeeded('Created default events', [
 		{
 			id: ulid(),
 			userId: SYSTEM_ACTOR_ID,
 			userName: SYSTEM_ACTOR_NAME,
 			action: 'init.workspace',
-			payload: {id: workspaceId, name: 'Workspace', rank: workspaceRank},
+			payload: {
+				id: workspaceId,
+				name: 'Workspace',
+				rank: workspaceRank.value,
+			},
 		},
 		{
 			id: ulid(),
@@ -99,7 +113,7 @@ export function createDefaultEvents(): readonly AppEvent[] {
 				id: boardId,
 				name: 'Default',
 				parent: workspaceId,
-				rank: defaultBoardRank,
+				rank: defaultBoardRank.value,
 			},
 		},
 		{
@@ -107,7 +121,12 @@ export function createDefaultEvents(): readonly AppEvent[] {
 			userId: SYSTEM_ACTOR_ID,
 			userName: SYSTEM_ACTOR_NAME,
 			action: 'add.swimlane',
-			payload: {id: swimlaneId1, name: 'Todo', parent: boardId, rank: todoRank},
+			payload: {
+				id: swimlaneId1,
+				name: 'Todo',
+				parent: boardId,
+				rank: todoRank.value,
+			},
 		},
 		{
 			id: ulid(),
@@ -118,7 +137,7 @@ export function createDefaultEvents(): readonly AppEvent[] {
 				id: swimlaneId2,
 				name: 'In progress',
 				parent: boardId,
-				rank: inProgressRank,
+				rank: inProgressRank.value,
 			},
 		},
 		{
@@ -126,7 +145,12 @@ export function createDefaultEvents(): readonly AppEvent[] {
 			userId: SYSTEM_ACTOR_ID,
 			userName: SYSTEM_ACTOR_NAME,
 			action: 'add.swimlane',
-			payload: {id: swimlaneId3, name: 'Done', parent: boardId, rank: doneRank},
+			payload: {
+				id: swimlaneId3,
+				name: 'Done',
+				parent: boardId,
+				rank: doneRank.value,
+			},
 		},
 		{
 			id: ulid(),
@@ -137,7 +161,7 @@ export function createDefaultEvents(): readonly AppEvent[] {
 				id: CLOSED_BOARD_ID,
 				name: 'Closed',
 				parent: workspaceId,
-				rank: closedBoardRank,
+				rank: closedBoardRank.value,
 			},
 		},
 		{
@@ -149,7 +173,7 @@ export function createDefaultEvents(): readonly AppEvent[] {
 				id: CLOSED_SWIMLANE_ID,
 				name: 'Closed',
 				parent: CLOSED_BOARD_ID,
-				rank: closedSwimlaneRank,
+				rank: closedSwimlaneRank.value,
 			},
 		},
 		{
@@ -166,7 +190,7 @@ export function createDefaultEvents(): readonly AppEvent[] {
 			action: 'lock.node',
 			payload: {id: CLOSED_SWIMLANE_ID},
 		},
-	] as const satisfies readonly AppEvent[];
+	] as const satisfies readonly AppEvent[]);
 }
 
 export function hasPendingDefaultEvents(): boolean {
@@ -204,7 +228,10 @@ export function bootStateFromEventLog(eventLog: AppEvent[]): Result {
 	let results;
 
 	if (!eventLog.some(e => e.action === 'init.workspace')) {
-		pendingDefaultEvents = createDefaultEvents();
+		const defaultEventsResult = createDefaultEvents();
+		if (isFail(defaultEventsResult)) return defaultEventsResult;
+
+		pendingDefaultEvents = defaultEventsResult.value;
 		results = materializeAll([...pendingDefaultEvents]);
 	} else {
 		pendingDefaultEvents = null;
