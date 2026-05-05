@@ -11,8 +11,9 @@ import {theme} from '../theme/themes.js';
 import {CursorUI} from './Cursor.js';
 import {FieldListUI} from './FieldListUI.js';
 import {InlineEditor} from './InlineEditor.js';
-import {bigIntToHex} from '../utils/rank.js';
+import {bigIntToHex, MAX_RANK} from '../utils/rank.js';
 import {isFail} from '../model/result-types.js';
+import {FieldNames} from '../repository/fielNames.js';
 
 type Props = {
 	ticket: Ticket;
@@ -39,18 +40,25 @@ export const TicketUI: React.FC<Props> = ({ticket, height}) => {
 		const existing = nodeRepo.getNode(logNodeId);
 		if (existing) return;
 
-		const rankResult = bigIntToHex(1n);
+		const rankResult = bigIntToHex(MAX_RANK);
 		if (isFail(rankResult)) return;
 
-		const logNode: NavNode<AnyContext> = {
-			...nodes.field(logNodeId, 'Log', ticket.id, rankResult.value, {
-				value: logText,
+		const historyLogNode: NavNode<AnyContext> = {
+			...nodes.field({
+				id: logNodeId,
+				name: FieldNames.HISTORY,
+				parentNodeId: ticket.id,
+				rank: rankResult.value,
+				props: {
+					value: logText,
+				},
+				isVirtual: true,
 			}),
 			readonly: true,
 			childRenderAxis: 'vertical',
 		};
 
-		nodeRepo.createNode(logNode);
+		nodeRepo.createNode(historyLogNode);
 
 		return () => {
 			nodeRepo.deleteNode(logNodeId);
@@ -158,7 +166,7 @@ export const TicketUI: React.FC<Props> = ({ticket, height}) => {
 			);
 		}
 
-		if (child.title === 'Description') {
+		if (child.title === FieldNames.DESCRIPTION) {
 			return (
 				<InlineEditor
 					label="Description (press e to edit)"

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {readProjectId} from '../lib/init/init.js';
+import {readProjectId} from '../lib/project-setup/project-setup.js';
 import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
 import {
 	EPIQ_DIR_NAME,
@@ -23,7 +23,11 @@ export const getEpiqGlobal = (): string =>
 export const getWorktreesRoot = (): string =>
 	path.join(getEpiqGlobal(), 'worktrees');
 
-export const getStateBranchRoot = (repoRoot: string): Result<string> => {
+export const getStateBranchRoot = ({
+	repoRoot,
+}: {
+	repoRoot: string;
+}): Result<string> => {
 	const projectIdResult = readProjectId(repoRoot);
 	if (isFail(projectIdResult)) return failed(projectIdResult.message);
 

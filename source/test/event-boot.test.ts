@@ -69,7 +69,10 @@ beforeEach(() => {
 
 describe('event boot', () => {
 	it('creates the default workspace events', () => {
-		const result = createDefaultEvents();
+		const result = createDefaultEvents({
+			userId: 'userId',
+			userName: 'userName',
+		});
 
 		expect(isFail(result)).toBe(false);
 		if (isFail(result)) return;
@@ -110,7 +113,7 @@ describe('event boot', () => {
 	});
 
 	it('boots successfully when event log is empty', () => {
-		const result = bootStateFromEventLog([]);
+		const result = bootStateFromEventLog({eventLog: [], hasProject: true});
 
 		expect(isFail(result)).toBe(false);
 
@@ -143,7 +146,10 @@ describe('event boot', () => {
 			}),
 		] as const;
 
-		const result = bootStateFromEventLog([...eventLog]);
+		const result = bootStateFromEventLog({
+			eventLog: [...eventLog],
+			hasProject: true,
+		});
 
 		expect(isFail(result)).toBe(false);
 		expect(getState().nodes['workspace-1']).toBeDefined();
@@ -152,25 +158,28 @@ describe('event boot', () => {
 	});
 
 	it('returns the first swimlane as boot navigation target when available', () => {
-		const result = bootStateFromEventLog([
-			event('init.workspace', {
-				id: 'workspace-1',
-				name: 'Workspace',
-				rank: rank(),
-			}),
-			event('add.board', {
-				id: 'board-1',
-				name: 'Board',
-				parent: 'workspace-1',
-				rank: rank(),
-			}),
-			event('add.swimlane', {
-				id: 'swimlane-1',
-				name: 'Todo',
-				parent: 'board-1',
-				rank: rank(),
-			}),
-		]);
+		const result = bootStateFromEventLog({
+			eventLog: [
+				event('init.workspace', {
+					id: 'workspace-1',
+					name: 'Workspace',
+					rank: rank(),
+				}),
+				event('add.board', {
+					id: 'board-1',
+					name: 'Board',
+					parent: 'workspace-1',
+					rank: rank(),
+				}),
+				event('add.swimlane', {
+					id: 'swimlane-1',
+					name: 'Todo',
+					parent: 'board-1',
+					rank: rank(),
+				}),
+			],
+			hasProject: true,
+		});
 
 		expect(isFail(result)).toBe(false);
 
@@ -181,19 +190,22 @@ describe('event boot', () => {
 	});
 
 	it('returns the first board as boot navigation target when no swimlane exists', () => {
-		const result = bootStateFromEventLog([
-			event('init.workspace', {
-				id: 'workspace-1',
-				name: 'Workspace',
-				rank: rank(),
-			}),
-			event('add.board', {
-				id: 'board-1',
-				name: 'Board',
-				parent: 'workspace-1',
-				rank: rank(),
-			}),
-		]);
+		const result = bootStateFromEventLog({
+			eventLog: [
+				event('init.workspace', {
+					id: 'workspace-1',
+					name: 'Workspace',
+					rank: rank(),
+				}),
+				event('add.board', {
+					id: 'board-1',
+					name: 'Board',
+					parent: 'workspace-1',
+					rank: rank(),
+				}),
+			],
+			hasProject: true,
+		});
 
 		expect(isFail(result)).toBe(false);
 
@@ -204,17 +216,20 @@ describe('event boot', () => {
 	});
 
 	it('fails boot when event materialization fails', () => {
-		const result = bootStateFromEventLog([
-			event('init.workspace', {
-				id: 'workspace-1',
-				name: 'Workspace',
-				rank: rank(),
-			}),
-			event('edit.title', {
-				id: 'missing-node',
-				name: 'Nope',
-			}),
-		]);
+		const result = bootStateFromEventLog({
+			eventLog: [
+				event('init.workspace', {
+					id: 'workspace-1',
+					name: 'Workspace',
+					rank: rank(),
+				}),
+				event('edit.title', {
+					id: 'missing-node',
+					name: 'Nope',
+				}),
+			],
+			hasProject: true,
+		});
 
 		expect(isFail(result)).toBe(true);
 		if (isFail(result)) {

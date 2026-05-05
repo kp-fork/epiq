@@ -27,7 +27,7 @@ const hasLocalEpiqDir = (dir: string): boolean => {
 	return fs.existsSync(candidate) && fs.statSync(candidate).isDirectory();
 };
 
-const hasLocalProjectFile = (dir: string): boolean => {
+export const hasLocalProjectFile = (dir: string): boolean => {
 	const candidate = getProjectFilePath(dir);
 
 	return fs.existsSync(candidate) && fs.statSync(candidate).isFile();

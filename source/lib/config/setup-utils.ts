@@ -1,4 +1,4 @@
-import {readProjectFile} from '../init/init.js';
+import {readProjectFile} from '../project-setup/project-setup.js';
 import {failed, isFail, isSuccess} from '../model/result-types.js';
 import {getSettingsState} from '../state/settings.state.js';
 import {resolveClosestEpiqProjectRoot} from '../storage/paths.js';

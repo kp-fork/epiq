@@ -251,13 +251,13 @@ export const nodeRepo = {
 			return failed('Contributor already assigned');
 		}
 
-		const assignmentNode = nodes.field(
-			assignmentNodeId,
-			contributor.name,
-			assigneesField.id,
+		const assignmentNode = nodes.field({
+			id: assignmentNodeId,
+			name: contributor.name,
+			parentNodeId: assigneesField.id,
 			rank,
-			{value: contributorId},
-		);
+			props: {value: contributorId},
+		});
 
 		const result = this.createNode(assignmentNode);
 		if (isFail(result)) return result;
@@ -301,8 +301,14 @@ export const nodeRepo = {
 			return failed('Tag already assigned');
 		}
 
-		const tagNode = nodes.field(tagNodeId, tag.name, tagsField.id, rank, {
-			value: tagId,
+		const tagNode = nodes.field({
+			id: tagNodeId,
+			name: tag.name,
+			parentNodeId: tagsField.id,
+			rank,
+			props: {
+				value: tagId,
+			},
 		});
 
 		const result = this.createNode(tagNode);

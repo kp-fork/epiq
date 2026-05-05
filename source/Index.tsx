@@ -87,7 +87,10 @@ async function bootApp() {
 		}
 	}
 
-	const eventLogBootResult = bootStateFromEventLog(bootContext.events);
+	const eventLogBootResult = bootStateFromEventLog({
+		hasProject: bootContext.hasProject,
+		eventLog: bootContext.events,
+	});
 
 	if (isFail(eventLogBootResult)) {
 		logger.info(`Failed to boot state: ${eventLogBootResult.message}`);

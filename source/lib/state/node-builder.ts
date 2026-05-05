@@ -57,14 +57,23 @@ export const nodes = {
 		log: [],
 	}),
 
-	field: (
-		id: string,
-		name: string,
-		parentNodeId: string,
-		rank: string,
-		props: NavNode<'FIELD'>['props'] = {},
-		childRenderAxis: NavNode<AnyContext>['childRenderAxis'] = 'horizontal',
-	): NavNode<'FIELD'> => ({
+	field: ({
+		id,
+		name,
+		parentNodeId,
+		rank,
+		props = {},
+		childRenderAxis = 'horizontal',
+		isVirtual = false,
+	}: {
+		id: string;
+		name: string;
+		parentNodeId: string;
+		rank: string;
+		props: NavNode<'FIELD'>['props'];
+		childRenderAxis?: NavNode<AnyContext>['childRenderAxis'];
+		isVirtual?: boolean;
+	}): NavNode<'FIELD'> => ({
 		id,
 		title: name,
 		rank,
@@ -75,6 +84,7 @@ export const nodes = {
 		parentNodeId,
 		readonly: false,
 		log: [],
+		isVirtual,
 	}),
 
 	ticket: (
@@ -102,12 +112,14 @@ export const nodes = {
 		rank,
 		props = {},
 		readonly = true,
+		isVirtual = true,
 	}: {
 		id: string;
 		name: string;
 		parentNodeId: string;
 		rank: string;
 		props?: NavNode<'TEXT'>['props'];
+		isVirtual?: boolean;
 		readonly?: boolean;
 	}): NavNode<'TEXT'> => ({
 		id,
@@ -120,5 +132,6 @@ export const nodes = {
 		parentNodeId,
 		readonly,
 		log: [],
+		isVirtual,
 	}),
 };

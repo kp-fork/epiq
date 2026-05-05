@@ -1,4 +1,4 @@
-import {readProjectFile} from '../lib/init/init.js';
+import {readProjectFile} from '../lib/project-setup/project-setup.js';
 import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
 import {resolveClosestEpiqProjectRoot} from '../lib/storage/paths.js';
 

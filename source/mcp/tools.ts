@@ -65,7 +65,10 @@ const boot = (repoRoot?: string): Result<BootResult> => {
 	const eventsResult = loadMergedEvents(epiqRootResult.value);
 	if (isFail(eventsResult)) return failed(eventsResult.message);
 
-	const bootResult = bootStateFromEventLog(eventsResult.value);
+	const bootResult = bootStateFromEventLog({
+		eventLog: eventsResult.value,
+		hasProject: true,
+	});
 	if (isFail(bootResult)) return failed(bootResult.message);
 
 	return succeeded('Booted Epiq state', {root: epiqRootResult.value});
