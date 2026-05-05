@@ -2,8 +2,8 @@ import {useSyncExternalStore} from 'react';
 import {contextActions} from '../actions/action-map.js';
 import {DefaultActions} from '../actions/default/default-actions.js';
 import {inputActions} from '../actions/input/input-actions.js';
-import {failed, isFail, Result, succeeded} from '../model/result-types.js';
 import {Hints} from '../hints/hints.js';
+import {readProjectFile} from '../init/init.js';
 import {Mode} from '../model/action-map.model.js';
 import type {AppState, Filter} from '../model/app-state.model.js';
 import {
@@ -12,12 +12,11 @@ import {
 	type Workspace,
 } from '../model/context.model.js';
 import type {NavNode} from '../model/navigation-node.model.js';
+import {failed, isFail, Result, succeeded} from '../model/result-types.js';
+import {resolveClosestEpiqProjectRoot} from '../storage/paths.js';
 import {ticketMatchesFilter} from '../utils/filter.js';
 import {buildBreadCrumb} from '../utils/nav-tree.js';
 import {buildActionIndex} from './action-helper.js';
-import {readProjectFile} from '../init/init.js';
-import {getRepoRootDir} from '../../git/git-storage.js';
-import {resolveClosestEpiqProjectRoot} from '../storage/paths.js';
 
 type DerivedKeys =
 	| 'availableActions'
@@ -114,12 +113,16 @@ export const getState = () => {
 
 export function initWorkspaceState(workspace: Workspace) {
 	_initialWorkspace = workspace;
-
 	const repoRootResult = resolveClosestEpiqProjectRoot(process.cwd());
-	if (isFail(repoRootResult)) return failed(repoRootResult.message);
 
-	const projectDataResult = readProjectFile(repoRootResult.value);
-	const hasProject = !isFail(projectDataResult);
+	let hasProject = false;
+
+	if (!isFail(repoRootResult)) {
+		const projectResult = readProjectFile(repoRootResult.value);
+		if (isFail(projectResult)) return failed(projectResult.message);
+
+		hasProject = true;
+	}
 
 	const base: BaseState = {
 		readOnly: false,

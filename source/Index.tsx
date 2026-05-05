@@ -60,37 +60,13 @@ const loadBootContext = (): BootContext => {
 	const epiqRootDirResult = resolveClosestEpiqProjectRoot(process.cwd());
 
 	if (isFail(epiqRootDirResult)) {
-		logger.info('No .epiq/project.json found, starting in init mode');
-
-		return {
-			hasProject: false,
-			epiqRootDir: null,
-			events: [],
-		};
-	}
-
-	const eventsResult = loadMergedEvents(epiqRootDirResult.value);
-
-	if (isFail(eventsResult)) {
-		const noEventsFound = eventsResult.message.includes('No events found');
-
-		if (noEventsFound) {
-			logger.info('No events found, starting with empty state');
-
-			return {
-				hasProject: true,
-				epiqRootDir: epiqRootDirResult.value,
-				events: [],
-			};
-		}
-
-		throw new Error(eventsResult.message);
+		return {hasProject: false, epiqRootDir: null, events: []};
 	}
 
 	return {
 		hasProject: true,
 		epiqRootDir: epiqRootDirResult.value,
-		events: eventsResult.value,
+		events: [],
 	};
 };
 
@@ -105,12 +81,16 @@ async function bootApp() {
 
 	if (bootContext.hasProject) {
 		await syncEpiqFromRemote();
+		const eventsResult = loadMergedEvents(bootContext.epiqRootDir!);
+		if (!isFail(eventsResult)) {
+			bootContext.events = eventsResult.value;
+		}
 	}
 
 	const eventLogBootResult = bootStateFromEventLog(bootContext.events);
 
 	if (isFail(eventLogBootResult)) {
-		throw new Error(`Failed to boot state: ${eventLogBootResult.message}`);
+		logger.info(`Failed to boot state: ${eventLogBootResult.message}`);
 	}
 
 	patchState({hasProject: bootContext.hasProject});

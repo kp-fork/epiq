@@ -163,7 +163,7 @@ function loadAllPersistedEvents(
 	const dir = getEventsDirPath(epiqRoot);
 
 	if (!fs.existsSync(dir)) {
-		return failed('No events found');
+		return succeeded('No events found', []);
 	}
 
 	const files = fs
@@ -224,66 +224,68 @@ export function getEdgeRef(rootDir = process.cwd()): Result<string | null> {
 export const getSortedEvents = (
 	reconstructedEvents: ReconstructedEvent[],
 ): ReconstructedEvent[] => {
-	const afterMap = new Map<string | null, ReconstructedEvent[]>();
+	const byEventId = new Map<string, ReconstructedEvent>();
+	const childrenByRef = new Map<string | null, ReconstructedEvent[]>();
 
 	for (const event of reconstructedEvents) {
-		const afterRef = event.id[1] ?? null;
-		const anchoredEvents = afterMap.get(afterRef) ?? [];
+		const eventId = event.id[0];
+		const refId = event.id[1] ?? null;
 
-		anchoredEvents.push(event);
-		afterMap.set(afterRef, anchoredEvents);
+		byEventId.set(eventId, event);
+
+		const children = childrenByRef.get(refId) ?? [];
+		children.push(event);
+		childrenByRef.set(refId, children);
 	}
 
-	for (const anchoredEvents of afterMap.values()) {
-		anchoredEvents.sort((a, b) => a.id[0].localeCompare(b.id[0]));
+	for (const children of childrenByRef.values()) {
+		children.sort((a, b) => a.id[0].localeCompare(b.id[0]));
 	}
 
 	const result: ReconstructedEvent[] = [];
 	const placed = new Set<string>();
 
-	place(afterMap.get(null) ?? []);
+	const visit = (event: ReconstructedEvent) => {
+		const eventId = event.id[0];
 
-	let changed = true;
-	while (changed) {
-		changed = false;
+		if (placed.has(eventId)) return;
 
-		for (let i = 0; i < result.length; i++) {
-			const anchor = result[i];
-			if (!anchor) continue;
+		result.push(event);
+		placed.add(eventId);
 
-			const pendingAnchoredEvents = (afterMap.get(anchor.id[0]) ?? []).filter(
-				event => !placed.has(event.id[0]),
-			);
-
-			if (pendingAnchoredEvents.length === 0) continue;
-
-			result.splice(i + 1, 0, ...pendingAnchoredEvents);
-
-			for (const event of pendingAnchoredEvents) {
-				placed.add(event.id[0]);
-			}
-
-			changed = true;
-			i += pendingAnchoredEvents.length;
+		const children = childrenByRef.get(eventId) ?? [];
+		for (const child of children) {
+			visit(child);
 		}
+	};
+
+	const roots = childrenByRef.get(null) ?? [];
+	for (const root of roots) {
+		visit(root);
 	}
 
-	const danglingEvents = reconstructedEvents
+	const orphanRoots = reconstructedEvents
+		.filter(event => {
+			const eventId = event.id[0];
+			const refId = event.id[1] ?? null;
+
+			return !placed.has(eventId) && refId !== null && !byEventId.has(refId);
+		})
+		.sort((a, b) => a.id[0].localeCompare(b.id[0]));
+
+	for (const orphanRoot of orphanRoots) {
+		visit(orphanRoot);
+	}
+
+	const remaining = reconstructedEvents
 		.filter(event => !placed.has(event.id[0]))
 		.sort((a, b) => a.id[0].localeCompare(b.id[0]));
 
-	result.push(...danglingEvents);
+	for (const event of remaining) {
+		visit(event);
+	}
 
 	return result;
-
-	function place(events: ReconstructedEvent[]) {
-		for (const event of events) {
-			if (placed.has(event.id[0])) continue;
-
-			result.push(event);
-			placed.add(event.id[0]);
-		}
-	}
 };
 
 export const splitEventsAtTime = (

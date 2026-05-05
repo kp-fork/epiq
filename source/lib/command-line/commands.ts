@@ -1,5 +1,6 @@
 import {ulid} from 'ulid';
 import {exportBoardLayout} from '../../export/export.js';
+import {ensureLocalEpiqIgnored} from '../../git/ensure-local-events-ignored.js';
 import {syncEpiqWithRemote} from '../../git/sync.js';
 import {navigationUtils} from '../actions/default/navigation-action-utils.js';
 import {
@@ -17,8 +18,8 @@ import {openEditorOnText} from '../editor/editor.js';
 import {createIssueEvents} from '../event/common-events.js';
 import {getEventTime} from '../event/date-utils.js';
 import {
-	hasPendingDefaultEvents,
-	persistPendingDefaultEvents,
+	bootStateFromEventLog,
+	createDefaultEvents,
 } from '../event/event-boot.js';
 import {loadMergedEvents, splitEventsAtTime} from '../event/event-load.js';
 import {
@@ -30,6 +31,7 @@ import {getPersistFileName, resolveActorId} from '../event/event-persist.js';
 import {AppEvent, MovePosition} from '../event/event.model.js';
 import {resolveReopenParentFromLog} from '../event/log-utils.js';
 import {CLOSED_SWIMLANE_ID} from '../event/static-ids.js';
+import {ensureProjectFile} from '../init/init.js';
 import {CommandLineActionEntry, Mode} from '../model/action-map.model.js';
 import {Filter, findInBreadCrumb} from '../model/app-state.model.js';
 import {isTicketNode} from '../model/context.model.js';
@@ -55,14 +57,15 @@ import {
 	resetState,
 	updateState,
 } from '../state/state.js';
-import {resolveClosestEpiqRoot} from '../storage/paths.js';
+import {
+	resolveClosestEpiqProjectRoot,
+	resolveClosestEpiqRoot,
+} from '../storage/paths.js';
 import {CmdKeywords} from './cmd-keywords.js';
 import {cmdValidity} from './cmd-validity.js';
 import {CmdIntent} from './command-meta.js';
 import {getCmdModifiers} from './command-modifiers.js';
 import {parsePeekDateInput} from './validate-date.js';
-import {ensureProjectFile} from '../init/init.js';
-import {ensureLocalEpiqIgnored} from '../../git/ensure-local-events-ignored.js';
 
 const findTagByName = (name: string) =>
 	Object.values(getState().tags).find(tag => tag.name === name);
@@ -501,8 +504,19 @@ export const commands: CommandLineActionEntry[] = [
 			const ignoreResult = await ensureLocalEpiqIgnored(process.cwd());
 			if (isFail(ignoreResult)) return ignoreResult;
 
-			const result = persistPendingDefaultEvents();
-			if (isFail(result)) return result;
+			// Create default events
+			const defaultEventsResult = createDefaultEvents();
+			if (isFail(defaultEventsResult)) return defaultEventsResult;
+
+			// Materialize them into state
+			const materializeResults = materializeAndPersistAll(
+				defaultEventsResult.value,
+			);
+			const failures = materializeResults.filter(isFail);
+
+			if (failures.length > 0) {
+				return failed(failures.map(f => f.message).join('\n'));
+			}
 
 			const {rootNodeId, nodes} = getState();
 
@@ -1026,26 +1040,12 @@ export const commands: CommandLineActionEntry[] = [
 			if (!userId) return failed('Unable to resolve userId');
 			if (!userName) return failed('Unable to resolve userName');
 
-			const persistDefaultsResult = hasPendingDefaultEvents()
-				? persistPendingDefaultEvents()
-				: succeeded('No pending default events', null);
-
-			if (isFail(persistDefaultsResult)) {
-				return failed(
-					`Unable to persist default events. ${persistDefaultsResult.message}`,
-				);
-			}
-
 			const userRes = resolveActorId();
 			if (isFail(userRes) || !userRes.value) {
 				return failed('Unable to resolve event log path');
 			}
 
 			const ownEventFileName = getPersistFileName(userRes.value);
-			logger.debug(
-				'[sync-command] pending defaults',
-				hasPendingDefaultEvents(),
-			);
 
 			const syncResult = await syncEpiqWithRemote({
 				ownEventFileName,
@@ -1062,21 +1062,29 @@ export const commands: CommandLineActionEntry[] = [
 				return failed(`Unable to sync state. ${syncResult.message}`);
 			}
 
+			const epiqRootDirResult = resolveClosestEpiqProjectRoot(process.cwd());
+			if (isFail(epiqRootDirResult)) return epiqRootDirResult;
+
+			const allLoadedEventsResult = loadMergedEvents(epiqRootDirResult.value);
+			if (isFail(allLoadedEventsResult)) {
+				return failed(
+					`Unable to load events. ${allLoadedEventsResult.message}`,
+				);
+			}
+
+			const bootResult = bootStateFromEventLog(allLoadedEventsResult.value);
+			if (isFail(bootResult)) {
+				return failed(`Unable to boot synced state. ${bootResult.message}`);
+			}
+
 			patchState({
+				hasProject: true,
 				syncStatus: {
 					msg: 'Synced',
 					status: 'synced',
 				},
 				mode: Mode.DEFAULT,
 			});
-
-			const epiqRootDirResult = resolveClosestEpiqRoot(process.cwd());
-			if (isFail(epiqRootDirResult)) throw new Error(epiqRootDirResult.message);
-
-			const allLoadedEventsResult = loadMergedEvents(epiqRootDirResult.value);
-			if (isFail(allLoadedEventsResult)) return failed('Unable to load events');
-
-			materializeAll(allLoadedEventsResult.value);
 
 			// Restore navigation
 			const restoreResult = restoreNavigationAnchor(navigationAnchor);
