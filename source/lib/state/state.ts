@@ -3,7 +3,7 @@ import {contextActions} from '../actions/action-map.js';
 import {DefaultActions} from '../actions/default/default-actions.js';
 import {inputActions} from '../actions/input/input-actions.js';
 import {Hints} from '../hints/hints.js';
-import {readProjectFile} from '../init/init.js';
+import {readProjectFile} from '../project-setup/project-setup.js';
 import {Mode} from '../model/action-map.model.js';
 import type {AppState, Filter} from '../model/app-state.model.js';
 import {
