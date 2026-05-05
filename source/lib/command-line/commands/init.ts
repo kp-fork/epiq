@@ -24,12 +24,12 @@ import {getUserSetupStatus} from '../../config/setup-utils.js';
 import {createDefaultEvents} from '../../event/event-boot.js';
 import {materializeAndPersistAll} from '../../event/event-materialize-and-persist.js';
 import {getPersistFileName, persist} from '../../event/event-persist.js';
+import {Mode} from '../../model/action-map.model.js';
+import {failed, isFail, succeeded} from '../../model/result-types.js';
 import {
 	ensureProjectFile,
 	getProjectFileContents,
 } from '../../project-setup/project-setup.js';
-import {Mode} from '../../model/action-map.model.js';
-import {failed, isFail, succeeded} from '../../model/result-types.js';
 import {getSettingsState} from '../../state/settings.state.js';
 import {getState, patchState} from '../../state/state.js';
 import {hasLocalProjectFile} from '../../storage/paths.js';

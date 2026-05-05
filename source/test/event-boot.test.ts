@@ -69,7 +69,10 @@ beforeEach(() => {
 
 describe('event boot', () => {
 	it('creates the default workspace events', () => {
-		const result = createDefaultEvents();
+		const result = createDefaultEvents({
+			userId: 'userId',
+			userName: 'userName',
+		});
 
 		expect(isFail(result)).toBe(false);
 		if (isFail(result)) return;
