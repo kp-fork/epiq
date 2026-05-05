@@ -10,3 +10,6 @@ coverage
 # [epiq]: hydrated state is never to be committed
 .epiq
 
+# [epiq]: local hydrated state is never committed
+.epiq/events/
+.epiq/logs/
