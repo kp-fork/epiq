@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
-import {STATE_BRANCH} from './git-constants.js';
+import {getStateBranch} from './git-constants.js';
 import {
 	ensureStateBranchLayout,
 	getEventFilePath,
@@ -35,9 +35,13 @@ export const syncEpiqFromRemote = async (
 
 	const {repoRoot, stateBranchRoot} = ready.value;
 
+	const stateBranchResult = getStateBranch(cwd);
+	if (isFail(stateBranchResult)) return stateBranchResult;
+	const stateBranch = stateBranchResult.value;
+
 	const pullResult = await pullBranchRebaseIfPresent({
 		cwd: stateBranchRoot,
-		branch: STATE_BRANCH,
+		branch: stateBranch,
 	});
 	if (isFail(pullResult)) return failed(pullResult.message);
 
@@ -240,9 +244,13 @@ export const syncEpiqWithRemote = async ({
 	let pushed = false;
 	let hydrated = false;
 
+	const stateBranchResult = getStateBranch(repoRoot);
+	if (isFail(stateBranchResult)) return stateBranchResult;
+	const stateBranch = stateBranchResult.value;
+
 	const pullResult = await pullBranchRebaseIfPresent({
 		cwd: stateBranchRoot,
-		branch: STATE_BRANCH,
+		branch: stateBranch,
 	});
 	if (isFail(pullResult)) return failed(pullResult.message);
 
@@ -267,13 +275,13 @@ export const syncEpiqWithRemote = async ({
 	commitSha = syncOwnResult.value.commitSha;
 
 	if (createdCommit || bootstrapped) {
-		const pushResult = await pushStateBranch(stateBranchRoot);
+		const pushResult = await pushStateBranch({stateBranchRoot, repoRoot});
 		let finalPushResult = pushResult;
 
 		if (isFail(pushResult) && isNonFastForward(pushResult.message)) {
 			const pullRetryResult = await pullBranchRebaseIfPresent({
 				cwd: stateBranchRoot,
-				branch: STATE_BRANCH,
+				branch: stateBranch,
 			});
 			if (isFail(pullRetryResult)) return failed(pullRetryResult.message);
 
@@ -291,7 +299,7 @@ export const syncEpiqWithRemote = async ({
 				commitSha = retrySyncOwnResult.value.commitSha;
 			}
 
-			finalPushResult = await pushStateBranch(stateBranchRoot);
+			finalPushResult = await pushStateBranch({stateBranchRoot, repoRoot});
 		}
 
 		if (isFail(finalPushResult)) return failed(finalPushResult.message);

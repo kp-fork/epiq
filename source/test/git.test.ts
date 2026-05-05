@@ -2,11 +2,24 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {isFail} from '../lib/model/result-types.js';
 import {execGit} from '../git/git-utils.js';
 import {syncEpiqFromRemote, syncEpiqWithRemote} from '../git/sync.js';
-import {STATE_BRANCH} from '../git/git-constants.js';
+import {isFail} from '../lib/model/result-types.js';
 
+const writeProjectFile = (repoRoot: string): void => {
+	writeFile(
+		path.join(repoRoot, '.epiq', 'project.json'),
+		JSON.stringify(
+			{
+				projectId: path.basename(repoRoot),
+				stateBranch: 'epiq/state',
+				createdAt: new Date(),
+			},
+			null,
+			2,
+		) + '\n',
+	);
+};
 const tempDirs: string[] = [];
 let originalHome: string | undefined;
 
@@ -128,6 +141,7 @@ describe('sync', () => {
 
 		await initBareRepo(remoteRoot);
 		await cloneRepo({remoteRoot, cloneRoot: repoRoot});
+		writeProjectFile(repoRoot);
 
 		await commitFile({
 			repoRoot,
@@ -171,6 +185,7 @@ describe('sync', () => {
 
 		await initBareRepo(remoteRoot);
 		await cloneRepo({remoteRoot, cloneRoot: repoRoot});
+		writeProjectFile(repoRoot);
 
 		await commitFile({
 			repoRoot,
@@ -203,9 +218,12 @@ describe('sync', () => {
 
 		const verifyClone = makeTempDir();
 		await cloneRepo({remoteRoot, cloneRoot: verifyClone});
+		writeProjectFile(verifyClone);
+
+		const stateBranch = 'epiq/state';
 
 		const checkoutStateBranch = await execGit({
-			args: ['checkout', STATE_BRANCH],
+			args: ['checkout', stateBranch],
 			cwd: verifyClone,
 		});
 		if (isFail(checkoutStateBranch))
@@ -228,6 +246,7 @@ describe('sync', () => {
 
 		await initBareRepo(remoteRoot);
 		await cloneRepo({remoteRoot, cloneRoot: repoA});
+		writeProjectFile(repoA);
 
 		await commitFile({
 			repoRoot: repoA,
@@ -243,6 +262,7 @@ describe('sync', () => {
 		if (isFail(pushResult)) throw new Error(pushResult.message);
 
 		await cloneRepo({remoteRoot, cloneRoot: repoB});
+		writeProjectFile(repoB);
 
 		const aliceFile = getEventsFile({
 			repoRoot: repoA,
@@ -275,6 +295,7 @@ describe('sync', () => {
 
 		await initBareRepo(remoteRoot);
 		await cloneRepo({remoteRoot, cloneRoot: repoA});
+		writeProjectFile(repoA);
 
 		await commitFile({
 			repoRoot: repoA,
@@ -303,6 +324,7 @@ describe('sync', () => {
 
 		const repoB = makeTempDir();
 		await cloneRepo({remoteRoot, cloneRoot: repoB});
+		writeProjectFile(repoB);
 
 		const bobFileName = 'u2.bob.jsonl';
 		const bobLocalPath = getEventsFile({
@@ -337,6 +359,7 @@ describe('sync', () => {
 
 		await initBareRepo(remoteRoot);
 		await cloneRepo({remoteRoot, cloneRoot: repoRoot});
+		writeProjectFile(repoRoot);
 
 		await commitFile({
 			repoRoot,

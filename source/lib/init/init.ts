@@ -14,7 +14,7 @@ export type EpiqProject = z.infer<typeof EpiqProjectSchema>;
 
 const createProjectFile = (): EpiqProject => ({
 	projectId: ulid(),
-	stateBranch: 'epiq/state',
+	stateBranch: 'epiq/eventlog',
 	createdAt: new Date().toISOString(),
 });
 
