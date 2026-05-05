@@ -45,27 +45,33 @@ export const DefaultActions: ActionEntry[] = [
 		mode: Mode.DEFAULT,
 		description: '[<Enter>] confirm/enter',
 		action: () => {
-			const {selectedNode} = getState();
+			const {selectedNode, currentNode} = getState();
 			const children = getOrderedChildren(selectedNode?.id ?? '');
-			if (!selectedNode?.isVirtual && (!children || !children.length)) {
-				let proposedCommand = '';
-				if (selectedNode?.title === FieldNames.DESCRIPTION) {
-					proposedCommand = 'edit ';
-				} else if (selectedNode?.title === FieldNames.ASSIGNEES) {
-					proposedCommand = 'assign ';
-				}
 
-				if (proposedCommand) {
-					setCmdInput(() => proposedCommand);
+			if (!children?.length) {
+				if (selectedNode?.title === FieldNames.DESCRIPTION) {
+					setCmdInput(() => 'edit ');
 					patchState({mode: Mode.COMMAND_LINE});
 					return succeeded('Propose command', true);
-				} else {
-					return failed('Cannot enter this node');
+				} else if (selectedNode?.title === FieldNames.ASSIGNEES) {
+					setCmdInput(() => 'assign ');
+					patchState({mode: Mode.COMMAND_LINE});
+					return succeeded('Propose command', true);
+				} else if (selectedNode?.title === FieldNames.TAGS) {
+					setCmdInput(() => 'tag ');
+					patchState({mode: Mode.COMMAND_LINE});
+					return succeeded('Propose command', true);
+				} else if (
+					currentNode.title === FieldNames.DESCRIPTION &&
+					selectedNode?.context === 'TEXT'
+				) {
+					setCmdInput(() => 'edit ');
+					patchState({mode: Mode.COMMAND_LINE});
+					return succeeded('Propose command', true);
 				}
 			}
 
 			navigationUtils.enterChildNode();
-
 			return succeeded('Entering context', null);
 		},
 	},

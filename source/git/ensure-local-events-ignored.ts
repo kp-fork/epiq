@@ -12,7 +12,7 @@ export const ensureLocalEpiqIgnored = async (
 		? fs.readFileSync(gitignorePath, 'utf8')
 		: '';
 
-	const ignorePatterns = ['.epiq/events/', '.epiq/logs/'];
+	const ignorePatterns = ['.epiq/events/', '.epiq/log/'];
 	const lines = content.split('\n').map(line => line.trim());
 
 	const missingPatterns = ignorePatterns.filter(

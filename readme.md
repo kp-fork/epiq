@@ -130,7 +130,7 @@ That’s it!
 > - Project definition in `./.epiq/project.json`
 > - Authoritative Git state at `~/.epiq-global/worktrees/<id>`
 > - Local cache in `./.epiq/events/` (ignored by Git)
-> - Update your `.Gitignore` to ignore local-only directories (`.epiq/events/`, `.epiq/logs/`)
+> - Update your `.Gitignore` to ignore local-only directories (`.epiq/events/`, `.epiq/log/`)
 
 > Epiq manages a dedicated Git state branch and worktree automatically as the source of truth for synchronization
 

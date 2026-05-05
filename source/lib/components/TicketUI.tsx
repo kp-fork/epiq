@@ -46,7 +46,7 @@ export const TicketUI: React.FC<Props> = ({ticket, height}) => {
 		const historyLogNode: NavNode<AnyContext> = {
 			...nodes.field({
 				id: logNodeId,
-				name: 'History',
+				name: FieldNames.HISTORY,
 				parentNodeId: ticket.id,
 				rank: rankResult.value,
 				props: {

@@ -49,6 +49,7 @@ export const InlineEditor: React.FC<Props> = ({
 				rank: rankResult.value,
 				props: {value: row},
 				readonly: true,
+				isVirtual: true,
 			});
 
 			const result = nodeRepo.createNode(node);

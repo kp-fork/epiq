@@ -9,4 +9,4 @@ coverage
 
 # [epiq]: local hydrated state is never committed
 .epiq/events/
-.epiq/logs/
+.epiq/log/
