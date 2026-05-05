@@ -11,7 +11,7 @@ import {theme} from '../theme/themes.js';
 import {CursorUI} from './Cursor.js';
 import {FieldListUI} from './FieldListUI.js';
 import {InlineEditor} from './InlineEditor.js';
-import {bigIntToHex} from '../utils/rank.js';
+import {bigIntToHex, MAX_RANK} from '../utils/rank.js';
 import {isFail} from '../model/result-types.js';
 
 type Props = {
@@ -39,18 +39,19 @@ export const TicketUI: React.FC<Props> = ({ticket, height}) => {
 		const existing = nodeRepo.getNode(logNodeId);
 		if (existing) return;
 
-		const rankResult = bigIntToHex(1n);
+		const rankResult = bigIntToHex(MAX_RANK);
 		if (isFail(rankResult)) return;
 
-		const logNode: NavNode<AnyContext> = {
-			...nodes.field(logNodeId, 'Log', ticket.id, rankResult.value, {
+		const historyLogNode: NavNode<AnyContext> = {
+			...nodes.field(logNodeId, 'History', ticket.id, rankResult.value, {
 				value: logText,
 			}),
 			readonly: true,
 			childRenderAxis: 'vertical',
+			rank: rankResult.value,
 		};
 
-		nodeRepo.createNode(logNode);
+		nodeRepo.createNode(historyLogNode);
 
 		return () => {
 			nodeRepo.deleteNode(logNodeId);

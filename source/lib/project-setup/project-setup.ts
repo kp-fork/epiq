@@ -8,7 +8,7 @@ export const DEFAULT_STATE_BRANCH = 'epiq/eventlog';
 const EpiqProjectSchema = z.object({
 	projectId: z.string().min(1),
 	stateBranch: z.string().min(1),
-	createdAt: z.string().datetime(),
+	createdAt: z.iso.datetime(),
 });
 
 export type EpiqProject = z.infer<typeof EpiqProjectSchema>;
