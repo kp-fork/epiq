@@ -6,6 +6,7 @@ import {
 	isWorkspaceNode,
 } from '../model/context.model.js';
 import {failed, isFail, ReturnFail, succeeded} from '../model/result-types.js';
+import {FieldNames} from '../repository/fielNames.js';
 import {nodeRepo} from '../repository/node-repo.js';
 import {nodes} from '../state/node-builder.js';
 import {getState, initWorkspaceState, updateState} from '../state/state.js';
@@ -145,14 +146,16 @@ const materializeHandlers: MaterializeHandlers = {
 		const {id, name, parent: parentId, val: value, rank} = event.payload;
 
 		const result = nodeRepo.createNode(
-			nodes.field(
+			nodes.field({
 				id,
 				name,
-				parentId,
+				parentNodeId: parentId,
 				rank,
-				{value},
-				name.includes('Description') ? 'vertical' : 'horizontal',
-			),
+				props: {value},
+				childRenderAxis: name.includes(FieldNames.DESCRIPTION)
+					? 'vertical'
+					: 'horizontal',
+			}),
 		);
 
 		if (isFail(result)) {

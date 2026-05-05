@@ -13,4 +13,5 @@ export type NavNode<U extends AnyContext> = {
 	childNavigationAcrossParents?: boolean;
 	readonly: boolean;
 	log: AppEvent[];
+	isVirtual?: boolean;
 };

@@ -13,6 +13,7 @@ import {FieldListUI} from './FieldListUI.js';
 import {InlineEditor} from './InlineEditor.js';
 import {bigIntToHex, MAX_RANK} from '../utils/rank.js';
 import {isFail} from '../model/result-types.js';
+import {FieldNames} from '../repository/fielNames.js';
 
 type Props = {
 	ticket: Ticket;
@@ -43,12 +44,18 @@ export const TicketUI: React.FC<Props> = ({ticket, height}) => {
 		if (isFail(rankResult)) return;
 
 		const historyLogNode: NavNode<AnyContext> = {
-			...nodes.field(logNodeId, 'History', ticket.id, rankResult.value, {
-				value: logText,
+			...nodes.field({
+				id: logNodeId,
+				name: 'History',
+				parentNodeId: ticket.id,
+				rank: rankResult.value,
+				props: {
+					value: logText,
+				},
+				isVirtual: true,
 			}),
 			readonly: true,
 			childRenderAxis: 'vertical',
-			rank: rankResult.value,
 		};
 
 		nodeRepo.createNode(historyLogNode);
@@ -159,7 +166,7 @@ export const TicketUI: React.FC<Props> = ({ticket, height}) => {
 			);
 		}
 
-		if (child.title === 'Description') {
+		if (child.title === FieldNames.DESCRIPTION) {
 			return (
 				<InlineEditor
 					label="Description (press e to edit)"

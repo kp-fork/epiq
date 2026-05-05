@@ -1,8 +1,10 @@
-import {succeeded} from '../../model/result-types.js';
 import {CmdKeywords} from '../../command-line/cmd-keywords.js';
 import {ActionEntry, Mode} from '../../model/action-map.model.js';
+import {failed, succeeded} from '../../model/result-types.js';
+import {FieldNames} from '../../repository/fielNames.js';
+import {getOrderedChildren} from '../../repository/rank.js';
 import {setCmdInput} from '../../state/cmd.state.js';
-import {patchState} from '../../state/state.js';
+import {getState, patchState} from '../../state/state.js';
 import {Intent} from '../../utils/key-intent.js';
 import {onConfirmCommandLineSequenceInput} from '../input/on-cmd-input-confirm.js';
 import {navigationUtils} from './navigation-action-utils.js';
@@ -43,7 +45,27 @@ export const DefaultActions: ActionEntry[] = [
 		mode: Mode.DEFAULT,
 		description: '[<Enter>] confirm/enter',
 		action: () => {
+			const {selectedNode} = getState();
+			const children = getOrderedChildren(selectedNode?.id ?? '');
+			if (!selectedNode?.isVirtual && (!children || !children.length)) {
+				let proposedCommand = '';
+				if (selectedNode?.title === FieldNames.DESCRIPTION) {
+					proposedCommand = 'edit ';
+				} else if (selectedNode?.title === FieldNames.ASSIGNEES) {
+					proposedCommand = 'assign ';
+				}
+
+				if (proposedCommand) {
+					setCmdInput(() => proposedCommand);
+					patchState({mode: Mode.COMMAND_LINE});
+					return succeeded('Propose command', true);
+				} else {
+					return failed('Cannot enter this node');
+				}
+			}
+
 			navigationUtils.enterChildNode();
+
 			return succeeded('Entering context', null);
 		},
 	},

@@ -3,6 +3,7 @@ import {isFail, Result, succeeded} from '../model/result-types.js';
 import {User} from '../state/settings.state.js';
 import {midRank, rankBetween} from '../utils/rank.js';
 import {AppEvent} from './event.model.js';
+import {FieldNames} from '../repository/fielNames.js';
 
 const nextId = monotonicFactory();
 
@@ -52,7 +53,7 @@ export const createIssueEvents = ({
 			payload: {
 				id: descriptionId,
 				parent: issueId,
-				name: 'Description',
+				name: FieldNames.DESCRIPTION,
 				val: '',
 				rank: descriptionRank.value,
 			},

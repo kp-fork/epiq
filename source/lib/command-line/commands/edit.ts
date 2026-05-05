@@ -5,6 +5,7 @@ import {resolveActorId} from '../../event/event-persist.js';
 import {BreadCrumb, findInBreadCrumb} from '../../model/app-state.model.js';
 import {failed, isFail, succeeded} from '../../model/result-types.js';
 import {getRenderedChildren, getState} from '../../state/state.js';
+import {FieldNames} from '../../repository/fielNames.js';
 
 export const editCommand = () => {
 	const userRes = resolveActorId();
@@ -20,7 +21,7 @@ export const editCommand = () => {
 	const issueNode = issueResult.value;
 	if (issueNode.readonly) return failed('Cannot edit readonly field');
 	const target = getRenderedChildren(issueNode.id).find(
-		x => x.title === 'Description',
+		x => x.title === FieldNames.DESCRIPTION,
 	);
 	if (!target) return failed('No target found');
 	if (target.readonly) return failed('Cannot edit readonly field');
@@ -40,7 +41,7 @@ export const editCommand = () => {
 		return succeeded('No changes made', null);
 	}
 
-	if (target.title === 'Description') {
+	if (target.title === FieldNames.DESCRIPTION) {
 		return materializeAndPersist({
 			id: ulid(),
 			action: 'edit.description',
