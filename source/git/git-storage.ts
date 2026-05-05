@@ -23,7 +23,11 @@ export const getEpiqGlobal = (): string =>
 export const getWorktreesRoot = (): string =>
 	path.join(getEpiqGlobal(), 'worktrees');
 
-export const getStateBranchRoot = (repoRoot: string): Result<string> => {
+export const getStateBranchRoot = ({
+	repoRoot,
+}: {
+	repoRoot: string;
+}): Result<string> => {
 	const projectIdResult = readProjectId(repoRoot);
 	if (isFail(projectIdResult)) return failed(projectIdResult.message);
 

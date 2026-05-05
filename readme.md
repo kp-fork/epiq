@@ -2,7 +2,7 @@
 
 # Epiq
 
-_Distributed CLI based issue tracker TUI_ backed by git.
+_Distributed CLI based issue tracker TUI_ backed by Git.
 
 Issue tracking is a part of the development lifecycle, but it often becomes a painful context switching exercise with poor ergonomics. `Epiq` provides issue tracking as a portable, integrated part of the development environment, with access to all the powerful tooling developers are used to. Epiq allows you to manage all your projects directly via the command line in a visual kanban board and edit content in your favorite editor.
 
@@ -24,17 +24,17 @@ Epiq is a vim-inspired issue tracker fully integrated in the terminal that bring
 
 Epiq renders your issue board directly in the terminal using ASCII and stores its state as an event log, versioned and synchronized through Git.
 
-![Epiq cli kanban view](https://raw.githubusercontent.com/ljtn/epiq/main/assets/overview.png)
-![Epiq cli log view](https://raw.githubusercontent.com/ljtn/epiq/main/assets/log.png)
+![Epiq cli kanban view](https://raw.Githubusercontent.com/ljtn/epiq/main/assets/overview.png)
+![Epiq cli log view](https://raw.Githubusercontent.com/ljtn/epiq/main/assets/log.png)
 
 ## Features
 
 - Issue tracking — track work in tickets with name, description, tags, assignees, history log, etc.
-- Ergonomics — fast keyboard-driven ux, command line with history, syntax highlighting etc.
+- Ergonomics — fast keyboard-driven UX, command line with history, syntax highlighting etc.
 - Time travel — inspect your app 1h, 1 week or 1 year ago
 - Filtering — query issues by description, tags, assignees, etc.
 - Autocompletion — minimize typing, stay in flow
-- Multi-user — real-time synchronization of board
+- Multi-user — collaborative synchronization via Git
 - Traceable event log — state is a full history of every change ever made
 
 ## Why epiq?
@@ -43,7 +43,7 @@ Most issue trackers live outside your workflow. Epiq brings issue tracking into 
 
 These design choices result in a system that is:
 
-- **Zero setup** — no account registration required
+- **Simple setup** — no accounts, SaaS, or external services required
 - **Repo-native** — your issues can live where your code lives
 - **Offline-friendly** — works anywhere, with eventual consistency as a promise
 - **Speed** — local first, and eventual consistency makes epiq edits instant
@@ -101,9 +101,17 @@ epiq --version
 
 ---
 
-## Getting Started
+## Getting Started in 2 steps
 
-In any folder, run:
+1. Make sure you're inside a Git repository
+
+```bash
+# If needed:
+Git init
+# For collaboration, use a repo with a remote (e.g. clone from GitHub)
+```
+
+2. Run:
 
 ```bash
 epiq
@@ -111,28 +119,20 @@ epiq
 
 If it is your first run, this opens the interactive setup wizard that sets you up in about 30 seconds.
 
-This creates settings in `~/.epiq-global/**`.
+That’s it!
 
-If the current folder is not yet an Epiq project, you will see an initialization screen.
+> Setup wizard creates:
+>
+> User config persisted in `~/.epiq-global/config.json`.
 
-Initialization will:
+> Initialization creates:
+>
+> - Project definition in `./.epiq/project.json`
+> - Authoritative Git state at `~/.epiq-global/worktrees/<id>`
+> - Local cache in `./.epiq/events/` (ignored by Git)
+> - Update your `.Gitignore` to ignore local-only directories (`.epiq/events/`, `.epiq/logs/`)
 
-Create a project anchor:
-
-```
-.epiq/project.json
-```
-
-Create local state directories:
-
-```
-.epiq/events/
-.epiq/logs/
-```
-
-Update your `.gitignore` to ignore local-only directories (`.epiq/events/`, `.epiq/logs/`)
-
-> When synced, Epiq will execute git commands on your behalf, targeting a dedicated state branch
+> Epiq manages a dedicated Git state branch and worktree automatically as the source of truth for synchronization
 
 ## Usage Guide
 
@@ -180,10 +180,17 @@ Clear all filters with `:filter clear`
 
 ## How epiq is synchronized
 
-Epiq uses Git in the background to synchronize state between clients. No manual git commands are required to make it work. Running `:sync` pulls and pushes changes between your local state and the remote state.
+Epiq separates state into:
+
+- **Source of truth** - Git state branch
+- **Local cache** - `.epiq/events/`
+
+Epiq uses Git in the background - no manual Git commands are required. Running `:sync` pulls and pushes changes between your local state and the remote state.
 
 - Your issue data is stored in a dedicated branch managed automatically by epiq
-- A `.epiq/` folder is created in your project, containing both shared project metadata and local state.
+- A `.epiq/` folder is created in your project:
+  - `project.json` stores project metadata
+  - `events/` is a local cache of synchronized event logs (ignored by Git)
 
 ## Conflict Avoidance & Data Integrity
 
@@ -213,8 +220,8 @@ Epiq resolves concurrent changes at the event level:
 
 - Events are designed to be **idempotent** where possible
 - Later events take precedence when conflicts occur
-
-Because events are append-only and scoped to 1 file per user, Git merges become trivial combinations of changes in independent files.
+- Each user writes to their own event log file
+- Git merges become trivial combinations of changes in independent files
 
 ### Local-first with eventual consistency
 

@@ -124,7 +124,7 @@ const ensureSyncReady = async ({
 	if (isFail(repoRootResult)) return failed(repoRootResult.message);
 
 	const repoRoot = repoRootResult.value;
-	const stateBranchRootResult = getStateBranchRoot(repoRoot);
+	const stateBranchRootResult = getStateBranchRoot({repoRoot});
 	if (isFail(stateBranchRootResult)) {
 		return failed(stateBranchRootResult.message);
 	}
@@ -194,7 +194,7 @@ const commitOwnEventFileToStateBranch = async ({
 
 	const stageResult = await stageStateBranchOwnEventFile({
 		stateBranchRoot,
-		ownEventFileName,
+		eventFileName: ownEventFileName,
 	});
 	if (isFail(stageResult)) return failed(stageResult.message);
 

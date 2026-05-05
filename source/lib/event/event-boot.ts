@@ -1,4 +1,3 @@
-import chalk from 'chalk';
 import {monotonicFactory, ulid} from 'ulid';
 import {navigationUtils} from '../actions/default/navigation-action-utils.js';
 import {Mode} from '../model/action-map.model.js';
@@ -14,9 +13,6 @@ import {rankBetween} from '../utils/rank.js';
 import {materializeAll} from './event-materialize.js';
 import {AppEvent} from './event.model.js';
 import {CLOSED_BOARD_ID, CLOSED_SWIMLANE_ID} from './static-ids.js';
-
-const SYSTEM_ACTOR_ID = `system` as const;
-const SYSTEM_ACTOR_NAME = `ACTOR` as const;
 
 const nextId = monotonicFactory();
 
@@ -66,7 +62,13 @@ export function navigateToInitialNode() {
 	navigationUtils.navigate(navigationTarget);
 }
 
-export function createDefaultEvents(): Result<readonly AppEvent[]> {
+export function createDefaultEvents({
+	userId,
+	userName,
+}: {
+	userId: string;
+	userName: string;
+}): Result<readonly AppEvent[]> {
 	const workspaceId = nextId();
 	const boardId = nextId();
 	const swimlaneId1 = nextId();
@@ -97,8 +99,8 @@ export function createDefaultEvents(): Result<readonly AppEvent[]> {
 	return succeeded('Created default events', [
 		{
 			id: ulid(),
-			userId: SYSTEM_ACTOR_ID,
-			userName: SYSTEM_ACTOR_NAME,
+			userId: userId,
+			userName: userName,
 			action: 'init.workspace',
 			payload: {
 				id: workspaceId,
@@ -108,8 +110,8 @@ export function createDefaultEvents(): Result<readonly AppEvent[]> {
 		},
 		{
 			id: ulid(),
-			userId: SYSTEM_ACTOR_ID,
-			userName: SYSTEM_ACTOR_NAME,
+			userId: userId,
+			userName: userName,
 			action: 'add.board',
 			payload: {
 				id: boardId,
@@ -120,8 +122,8 @@ export function createDefaultEvents(): Result<readonly AppEvent[]> {
 		},
 		{
 			id: ulid(),
-			userId: SYSTEM_ACTOR_ID,
-			userName: SYSTEM_ACTOR_NAME,
+			userId: userId,
+			userName: userName,
 			action: 'add.swimlane',
 			payload: {
 				id: swimlaneId1,
@@ -132,8 +134,8 @@ export function createDefaultEvents(): Result<readonly AppEvent[]> {
 		},
 		{
 			id: ulid(),
-			userId: SYSTEM_ACTOR_ID,
-			userName: SYSTEM_ACTOR_NAME,
+			userId: userId,
+			userName: userName,
 			action: 'add.swimlane',
 			payload: {
 				id: swimlaneId2,
@@ -144,8 +146,8 @@ export function createDefaultEvents(): Result<readonly AppEvent[]> {
 		},
 		{
 			id: ulid(),
-			userId: SYSTEM_ACTOR_ID,
-			userName: SYSTEM_ACTOR_NAME,
+			userId: userId,
+			userName: userName,
 			action: 'add.swimlane',
 			payload: {
 				id: swimlaneId3,
@@ -156,8 +158,8 @@ export function createDefaultEvents(): Result<readonly AppEvent[]> {
 		},
 		{
 			id: ulid(),
-			userId: SYSTEM_ACTOR_ID,
-			userName: SYSTEM_ACTOR_NAME,
+			userId: userId,
+			userName: userName,
 			action: 'add.board',
 			payload: {
 				id: CLOSED_BOARD_ID,
@@ -168,8 +170,8 @@ export function createDefaultEvents(): Result<readonly AppEvent[]> {
 		},
 		{
 			id: ulid(),
-			userId: SYSTEM_ACTOR_ID,
-			userName: SYSTEM_ACTOR_NAME,
+			userId: userId,
+			userName: userName,
 			action: 'add.swimlane',
 			payload: {
 				id: CLOSED_SWIMLANE_ID,
@@ -180,23 +182,29 @@ export function createDefaultEvents(): Result<readonly AppEvent[]> {
 		},
 		{
 			id: ulid(),
-			userId: SYSTEM_ACTOR_ID,
-			userName: SYSTEM_ACTOR_NAME,
+			userId: userId,
+			userName: userName,
 			action: 'lock.node',
 			payload: {id: CLOSED_BOARD_ID},
 		},
 		{
 			id: ulid(),
-			userId: SYSTEM_ACTOR_ID,
-			userName: SYSTEM_ACTOR_NAME,
+			userId: userId,
+			userName: userName,
 			action: 'lock.node',
 			payload: {id: CLOSED_SWIMLANE_ID},
 		},
 	] as const satisfies readonly AppEvent[]);
 }
 
-export function bootStateFromEventLog(eventLog: AppEvent[]): Result {
-	if (!eventLog.some(e => e.action === 'init.workspace')) {
+export function bootStateFromEventLog({
+	hasProject,
+	eventLog,
+}: {
+	hasProject: boolean;
+	eventLog: AppEvent[];
+}): Result {
+	if (!hasProject) {
 		const workspace = nodes.workspace(
 			'temporary-uninitialized-workspace',
 			'Workspace',
@@ -214,23 +222,22 @@ export function bootStateFromEventLog(eventLog: AppEvent[]): Result {
 		return succeeded('Booted uninitialized workspace placeholder', null);
 	}
 
+	if (!eventLog.some(e => e.action === 'init.workspace')) {
+		return failed('Initialized Epiq project has no workspace init event');
+	}
+
 	const results = materializeAll(eventLog);
 
 	const failures = results.filter(isFail);
 	if (failures.length > 0) {
-		return failed(
-			[
-				chalk.bold.red('Materializing failed'),
-				'',
-				...failures.map(
-					(x, i) => `${chalk.dim.gray(`${i + 1}.`)} ${chalk.dim(x.message)}`,
-				),
-				'\n',
-			].join('\n\n See complete log: \n\n') +
-				eventLog.map(x => JSON.stringify(x)).join('\n'),
-		);
+		return failed(failures.map(x => x.message).join('\n'));
 	}
 
 	navigateToInitialNode();
+
+	patchState({
+		hasProject: true,
+	});
+
 	return succeeded('State booted successfully', null);
 }

@@ -4,6 +4,7 @@ import {z} from 'zod';
 import {failed, isFail, Result, succeeded} from '../model/result-types.js';
 import {getEpiqDirPath, getProjectFilePath} from '../storage/paths.js';
 
+export const DEFAULT_STATE_BRANCH = 'epiq/eventlog';
 const EpiqProjectSchema = z.object({
 	projectId: z.string().min(1),
 	stateBranch: z.string().min(1),
@@ -12,12 +13,15 @@ const EpiqProjectSchema = z.object({
 
 export type EpiqProject = z.infer<typeof EpiqProjectSchema>;
 
-const createProjectFile = (): EpiqProject => ({
+export const getProjectFileContents = (): EpiqProject => ({
 	projectId: ulid(),
-	stateBranch: 'epiq/eventlog',
+	stateBranch: DEFAULT_STATE_BRANCH,
 	createdAt: new Date().toISOString(),
 });
 
+// ================================
+// TODO: memoize readProjectFile
+// ================================
 export const readProjectFile = (repoRoot: string): Result<EpiqProject> => {
 	const filePath = getProjectFilePath(repoRoot);
 
@@ -56,7 +60,13 @@ export const readProjectId = (repoRoot: string): Result<string> => {
 	return succeeded('Read projectId', result.value.projectId);
 };
 
-export const ensureProjectFile = (repoRoot: string): Result<null> => {
+export const ensureProjectFile = ({
+	repoRoot,
+	fileContents,
+}: {
+	repoRoot: string;
+	fileContents: EpiqProject;
+}): Result<null> => {
 	const epiqDir = getEpiqDirPath(repoRoot);
 	const projectFilePath = getProjectFilePath(repoRoot);
 
@@ -70,11 +80,9 @@ export const ensureProjectFile = (repoRoot: string): Result<null> => {
 			return succeeded('Project already initialized', null);
 		}
 
-		const project = createProjectFile();
-
 		fs.writeFileSync(
 			projectFilePath,
-			JSON.stringify(project, null, 2) + '\n',
+			JSON.stringify(fileContents, null, 2) + '\n',
 			'utf8',
 		);
 
