@@ -13,7 +13,6 @@ import {
 	setMovePendingState,
 } from '../actions/move/move-actions-utils.js';
 import {setConfig} from '../config/user-config.js';
-import {openEditorOnText} from '../editor/editor.js';
 import {createIssueEvents} from '../event/common-events.js';
 import {getEventTime} from '../event/date-utils.js';
 import {bootStateFromEventLog} from '../event/event-boot.js';
@@ -60,6 +59,7 @@ import {CmdKeywords} from './cmd-keywords.js';
 import {cmdValidity} from './cmd-validity.js';
 import {CmdIntent} from './command-meta.js';
 import {getCmdModifiers} from './command-modifiers.js';
+import {editCommand} from './commands/edit.js';
 import {initCommand} from './commands/init.js';
 import {parsePeekDateInput} from './validate-date.js';
 
@@ -242,65 +242,7 @@ export const commands: CommandLineActionEntry[] = [
 	{
 		intent: CmdIntent.Edit,
 		mode: Mode.COMMAND_LINE,
-		action: () => {
-			const userRes = resolveActorId();
-			if (isFail(userRes)) return failed('Unable to resolve user ID');
-
-			const issueResult = findInBreadCrumb(getState().breadCrumb, 'TICKET');
-			if (isFail(issueResult)) return failed('Edit target must be an issue');
-
-			const issueNode = issueResult.value;
-			if (issueNode.readonly) return failed('Cannot edit readonly field');
-			const {currentNode, selectedIndex} = getState();
-			const selectedChild = getRenderedChildren(issueNode.id)[selectedIndex];
-			if (!selectedChild) return failed('No selected field');
-
-			const target = getRenderedChildren(currentNode.id)[selectedIndex];
-
-			if (!target) return failed('No selected field');
-			if (target.readonly) return failed('Cannot edit readonly field');
-
-			const currentValue = target.props.value;
-
-			if (typeof currentValue !== 'string') {
-				return failed('Selected field is not editable text');
-			}
-
-			const editResult = openEditorOnText(currentValue);
-			if (isFail(editResult)) return failed('Failed to edit field');
-
-			const updatedValue = editResult.value;
-
-			if (updatedValue === currentValue) {
-				return succeeded('No changes made', null);
-			}
-
-			if (target.title === 'Description') {
-				return materializeAndPersist({
-					id: ulid(),
-					action: 'edit.description',
-					payload: {
-						id: target.id,
-						md: updatedValue,
-					},
-					...userRes.value,
-				});
-			}
-
-			if (target.title === 'Title') {
-				return materializeAndPersist({
-					id: ulid(),
-					action: 'edit.title',
-					payload: {
-						id: target.id,
-						name: updatedValue,
-					},
-					...userRes.value,
-				});
-			}
-
-			return failed(`Editing not supported for "${target.title}"`);
-		},
+		action: editCommand,
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
 	{
