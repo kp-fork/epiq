@@ -1,5 +1,7 @@
-import {hasPendingDefaultEvents} from '../event/event-boot.js';
+import {readProjectFile} from '../init/init.js';
+import {failed, isFail, isSuccess} from '../model/result-types.js';
 import {getSettingsState} from '../state/settings.state.js';
+import {resolveClosestEpiqProjectRoot} from '../storage/paths.js';
 
 export const getUserSetupStatus = (): {
 	hasPreferredEditor: boolean;
@@ -20,8 +22,10 @@ export const getUserSetupStatus = (): {
 	};
 };
 export const isRepositoryInitialized = () => {
-	const hasPendingEvents = hasPendingDefaultEvents();
-	const isConfigured = !hasPendingEvents;
+	const repoRootResult = resolveClosestEpiqProjectRoot(process.cwd());
+	if (isFail(repoRootResult))
+		return failed('Unable to determine if repository is initialized');
+	const projectFileResult = readProjectFile(repoRootResult.value);
 
-	return isConfigured;
+	return isSuccess(projectFileResult);
 };

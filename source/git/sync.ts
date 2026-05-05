@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
+import {getStateBranch} from './git-constants.js';
 import {
 	ensureStateBranchLayout,
 	getEventFilePath,
-	getStateBranchRoot,
 	getRepoRootDir,
+	getStateBranchRoot,
 } from './git-storage.js';
 import {
 	execGit,
@@ -18,13 +19,10 @@ import {
 	bootstrapStateBranchStorage,
 	createStateBranchSyncCommit,
 	ensureInitialCommit,
-	ensureLocalEventsIgnored,
 	pushStateBranch,
 	stageStateBranchOwnEventFile,
 } from './git.js';
-import {hydrateEventsFromStateBranch} from './merge.js';
-import {mergeEventFile} from './merge.js';
-import {STATE_BRANCH} from './git-constants.js';
+import {hydrateEventsFromStateBranch, mergeEventFile} from './merge.js';
 
 export const syncEpiqFromRemote = async (
 	cwd = process.cwd(),
@@ -37,9 +35,13 @@ export const syncEpiqFromRemote = async (
 
 	const {repoRoot, stateBranchRoot} = ready.value;
 
+	const stateBranchResult = getStateBranch(cwd);
+	if (isFail(stateBranchResult)) return stateBranchResult;
+	const stateBranch = stateBranchResult.value;
+
 	const pullResult = await pullBranchRebaseIfPresent({
 		cwd: stateBranchRoot,
-		branch: STATE_BRANCH,
+		branch: stateBranch,
 	});
 	if (isFail(pullResult)) return failed(pullResult.message);
 
@@ -122,12 +124,12 @@ const ensureSyncReady = async ({
 	if (isFail(repoRootResult)) return failed(repoRootResult.message);
 
 	const repoRoot = repoRootResult.value;
-	const stateBranchRoot = getStateBranchRoot(repoRoot);
-
-	const gitIgnoreResult = await ensureLocalEventsIgnored(repoRoot);
-	if (isFail(gitIgnoreResult)) {
-		return failed('Sync aborted. Unable to gitignore hydrated events');
+	const stateBranchRootResult = getStateBranchRoot(repoRoot);
+	if (isFail(stateBranchRootResult)) {
+		return failed(stateBranchRootResult.message);
 	}
+
+	const stateBranchRoot = stateBranchRootResult.value;
 
 	const repoOpResult = await hasInProgressGitOperation(repoRoot);
 	if (isFail(repoOpResult)) return failed(repoOpResult.message);
@@ -242,9 +244,13 @@ export const syncEpiqWithRemote = async ({
 	let pushed = false;
 	let hydrated = false;
 
+	const stateBranchResult = getStateBranch(repoRoot);
+	if (isFail(stateBranchResult)) return stateBranchResult;
+	const stateBranch = stateBranchResult.value;
+
 	const pullResult = await pullBranchRebaseIfPresent({
 		cwd: stateBranchRoot,
-		branch: STATE_BRANCH,
+		branch: stateBranch,
 	});
 	if (isFail(pullResult)) return failed(pullResult.message);
 
@@ -269,13 +275,13 @@ export const syncEpiqWithRemote = async ({
 	commitSha = syncOwnResult.value.commitSha;
 
 	if (createdCommit || bootstrapped) {
-		const pushResult = await pushStateBranch(stateBranchRoot);
+		const pushResult = await pushStateBranch({stateBranchRoot, repoRoot});
 		let finalPushResult = pushResult;
 
 		if (isFail(pushResult) && isNonFastForward(pushResult.message)) {
 			const pullRetryResult = await pullBranchRebaseIfPresent({
 				cwd: stateBranchRoot,
-				branch: STATE_BRANCH,
+				branch: stateBranch,
 			});
 			if (isFail(pullRetryResult)) return failed(pullRetryResult.message);
 
@@ -293,7 +299,7 @@ export const syncEpiqWithRemote = async ({
 				commitSha = retrySyncOwnResult.value.commitSha;
 			}
 
-			finalPushResult = await pushStateBranch(stateBranchRoot);
+			finalPushResult = await pushStateBranch({stateBranchRoot, repoRoot});
 		}
 
 		if (isFail(finalPushResult)) return failed(finalPushResult.message);

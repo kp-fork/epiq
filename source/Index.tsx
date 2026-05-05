@@ -2,15 +2,17 @@ import chalk from 'chalk';
 import {render} from 'ink';
 import meow from 'meow';
 import React from 'react';
-import App from './lib/components/App.js';
+import EpiqApp from './lib/components/EpiqApp.js';
 import {syncEpiqFromRemote} from './git/sync.js';
 import {loadSettingsFromConfig} from './lib/config/user-config.js';
 import {bootStateFromEventLog} from './lib/event/event-boot.js';
 import {loadMergedEvents} from './lib/event/event-load.js';
+import {AppEvent} from './lib/event/event.model.js';
 import {initListeners} from './lib/listeners/keypress-listener.js';
 import {isFail} from './lib/model/result-types.js';
 import {patchSettingsState} from './lib/state/settings.state.js';
-import {resolveClosestEpiqRoot} from './lib/storage/paths.js';
+import {patchState} from './lib/state/state.js';
+import {resolveClosestEpiqProjectRoot} from './lib/storage/paths.js';
 import './logger.js';
 
 meow(
@@ -23,10 +25,19 @@ ${chalk.dim('Boot in directory:')}
 	{
 		importMeta: import.meta,
 		flags: {
-			init: {type: 'string'},
+			init: {
+				type: 'boolean',
+				default: false,
+			},
 		},
 	},
 );
+
+type BootContext = {
+	hasProject: boolean;
+	epiqRootDir: string | null;
+	events: AppEvent[];
+};
 
 let width = process.stdout.columns || 120;
 let height = process.stdout.rows || 20;
@@ -42,47 +53,47 @@ const renderNode = (node: React.ReactNode) => {
 };
 
 const renderApp = () => {
-	renderNode(<App width={width} height={height} />);
+	renderNode(<EpiqApp width={width} height={height} />);
 };
 
-const loadEventLogOrExit = () => {
-	const epiqRootDirResult = resolveClosestEpiqRoot(process.cwd());
-	if (isFail(epiqRootDirResult)) throw Error(epiqRootDirResult.message);
-	const result = loadMergedEvents(epiqRootDirResult.value);
+const loadBootContext = (): BootContext => {
+	const epiqRootDirResult = resolveClosestEpiqProjectRoot(process.cwd());
 
-	if (isFail(result)) {
-		const noEventsFound = result.message.includes('No events found');
-
-		if (noEventsFound) {
-			logger.info('No events found, starting with empty state');
-			return [];
-		}
-
-		throw new Error(result.message);
+	if (isFail(epiqRootDirResult)) {
+		return {hasProject: false, epiqRootDir: null, events: []};
 	}
 
-	return result.value;
-};
-
-const bootStateOrExit = (eventLog: ReturnType<typeof loadEventLogOrExit>) => {
-	const result = bootStateFromEventLog(eventLog);
-
-	if (isFail(result)) {
-		throw new Error(`Failed to boot state: ${result.message}`);
-	}
+	return {
+		hasProject: true,
+		epiqRootDir: epiqRootDirResult.value,
+		events: [],
+	};
 };
 
 async function bootApp() {
 	const settings = loadSettingsFromConfig();
+
 	if (!isFail(settings)) {
 		patchSettingsState(settings.value);
 	}
 
-	await syncEpiqFromRemote();
+	const bootContext = loadBootContext();
 
-	const eventLog = loadEventLogOrExit();
+	if (bootContext.hasProject) {
+		await syncEpiqFromRemote();
+		const eventsResult = loadMergedEvents(bootContext.epiqRootDir!);
+		if (!isFail(eventsResult)) {
+			bootContext.events = eventsResult.value;
+		}
+	}
 
-	bootStateOrExit(eventLog);
+	const eventLogBootResult = bootStateFromEventLog(bootContext.events);
+
+	if (isFail(eventLogBootResult)) {
+		logger.info(`Failed to boot state: ${eventLogBootResult.message}`);
+	}
+
+	patchState({hasProject: bootContext.hasProject});
 
 	renderApp();
 	initListeners();

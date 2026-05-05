@@ -1,16 +1,14 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {isFail} from '../lib/model/result-types.js';
-import {getState, initWorkspaceState} from '../lib/state/state.js';
-import {nodes} from '../lib/state/node-builder.js';
 import {
 	bootStateFromEventLog,
 	createDefaultEvents,
 	getBootNavigationTarget,
-	hasPendingDefaultEvents,
-	persistPendingDefaultEvents,
 } from '../lib/event/event-boot.js';
 import {AppEvent} from '../lib/event/event.model.js';
 import {CLOSED_BOARD_ID, CLOSED_SWIMLANE_ID} from '../lib/event/static-ids.js';
+import {isFail} from '../lib/model/result-types.js';
+import {nodes} from '../lib/state/node-builder.js';
+import {getState, initWorkspaceState} from '../lib/state/state.js';
 import {bigIntToHex, midRank} from '../lib/utils/rank.js';
 
 const rank = () => {
@@ -111,23 +109,17 @@ describe('event boot', () => {
 		expect(lockClosedSwimlaneEvent.payload.id).toBe(CLOSED_SWIMLANE_ID);
 	});
 
-	it('boots default state when event log has no workspace init event', () => {
+	it('boots successfully when event log is empty', () => {
 		const result = bootStateFromEventLog([]);
 
 		expect(isFail(result)).toBe(false);
-		expect(hasPendingDefaultEvents()).toBe(true);
 
 		const state = getState();
 		const workspace = Object.values(state.nodes).find(
 			node => node.context === 'WORKSPACE',
 		);
-		const closedBoard = state.nodes[CLOSED_BOARD_ID];
-		const closedSwimlane = state.nodes[CLOSED_SWIMLANE_ID];
 
 		expect(workspace).toBeDefined();
-		expect(closedBoard).toBeDefined();
-		expect(closedSwimlane).toBeDefined();
-		expect(closedSwimlane?.parentNodeId).toBe(CLOSED_BOARD_ID);
 	});
 
 	it('boots from provided event log when workspace init exists', () => {
@@ -154,7 +146,6 @@ describe('event boot', () => {
 		const result = bootStateFromEventLog([...eventLog]);
 
 		expect(isFail(result)).toBe(false);
-		expect(hasPendingDefaultEvents()).toBe(false);
 		expect(getState().nodes['workspace-1']).toBeDefined();
 		expect(getState().nodes['board-1']?.parentNodeId).toBe('workspace-1');
 		expect(getState().nodes['swimlane-1']?.parentNodeId).toBe('board-1');
@@ -210,29 +201,6 @@ describe('event boot', () => {
 
 		expect(target.currentNode?.id).toBe('board-1');
 		expect(target.selectedIndex).toBe(0);
-	});
-
-	it('persists pending default events and clears the pending flag', () => {
-		const bootResult = bootStateFromEventLog([]);
-
-		expect(isFail(bootResult)).toBe(false);
-		expect(hasPendingDefaultEvents()).toBe(true);
-
-		const persistResult = persistPendingDefaultEvents();
-
-		if (isFail(persistResult)) {
-			console.log(persistResult.message);
-		}
-
-		expect(isFail(persistResult)).toBe(false);
-		expect(hasPendingDefaultEvents()).toBe(false);
-	});
-
-	it('returns success when there are no pending default events to persist', () => {
-		const result = persistPendingDefaultEvents();
-
-		expect(isFail(result)).toBe(false);
-		expect(hasPendingDefaultEvents()).toBe(false);
 	});
 
 	it('fails boot when event materialization fails', () => {

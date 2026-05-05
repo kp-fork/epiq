@@ -35,7 +35,10 @@ const materializeHandlers: MaterializeHandlers = {
 		const {id, name, rank} = event.payload;
 		const workspace = nodes.workspace(id, name, rank);
 
-		initWorkspaceState(workspace);
+		const initResult = initWorkspaceState(workspace);
+		if (isFail(initResult)) {
+			return materializeFail(initResult.message, event);
+		}
 
 		const result = nodeRepo.createNode(workspace);
 		if (isFail(result)) {
@@ -54,7 +57,6 @@ const materializeHandlers: MaterializeHandlers = {
 			result: result.value,
 		});
 	},
-
 	'add.workspace': event => {
 		const {id, name, rank} = event.payload;
 		const workspace = nodes.workspace(id, name, rank);

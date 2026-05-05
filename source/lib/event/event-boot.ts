@@ -1,22 +1,24 @@
 import chalk from 'chalk';
 import {monotonicFactory, ulid} from 'ulid';
 import {navigationUtils} from '../actions/default/navigation-action-utils.js';
+import {Mode} from '../model/action-map.model.js';
 import {failed, isFail, Result, succeeded} from '../model/result-types.js';
-import {getRenderedChildren, getState} from '../state/state.js';
+import {nodes} from '../state/node-builder.js';
+import {
+	getRenderedChildren,
+	getState,
+	initWorkspaceState,
+	patchState,
+} from '../state/state.js';
+import {rankBetween} from '../utils/rank.js';
 import {materializeAll} from './event-materialize.js';
-import {persist} from './event-persist.js';
 import {AppEvent} from './event.model.js';
 import {CLOSED_BOARD_ID, CLOSED_SWIMLANE_ID} from './static-ids.js';
-import {rankBetween} from '../utils/rank.js';
 
 const SYSTEM_ACTOR_ID = `system` as const;
 const SYSTEM_ACTOR_NAME = `ACTOR` as const;
 
 const nextId = monotonicFactory();
-
-// Keep the exact events that were used for first materialization,
-// so they can be persisted later without regenerating new ids.
-let pendingDefaultEvents: readonly AppEvent[] | null = null;
 
 export function getBootNavigationTarget() {
 	const workspace = Object.values(getState().nodes).find(
@@ -193,50 +195,26 @@ export function createDefaultEvents(): Result<readonly AppEvent[]> {
 	] as const satisfies readonly AppEvent[]);
 }
 
-export function hasPendingDefaultEvents(): boolean {
-	return pendingDefaultEvents !== null;
-}
-
-export function persistPendingDefaultEvents(): Result {
-	if (!pendingDefaultEvents || pendingDefaultEvents.length === 0) {
-		pendingDefaultEvents = null;
-		return succeeded('No pending default events to persist', null);
-	}
-
-	const failures = pendingDefaultEvents
-		.map(event => persist({event}))
-		.filter(isFail);
-
-	if (failures.length > 0) {
-		return failed(
-			[
-				chalk.bold.red('Persisting default events failed'),
-				'',
-				...failures.map(
-					(x, i) => `${chalk.dim.gray(`${i + 1}.`)} ${chalk.dim(x.message)}`,
-				),
-				'\n',
-			].join('\n'),
-		);
-	}
-
-	pendingDefaultEvents = null;
-	return succeeded('Persisted pending default events', null);
-}
-
 export function bootStateFromEventLog(eventLog: AppEvent[]): Result {
-	let results;
-
 	if (!eventLog.some(e => e.action === 'init.workspace')) {
-		const defaultEventsResult = createDefaultEvents();
-		if (isFail(defaultEventsResult)) return defaultEventsResult;
+		const workspace = nodes.workspace(
+			'temporary-uninitialized-workspace',
+			'Workspace',
+			'a0',
+		);
 
-		pendingDefaultEvents = defaultEventsResult.value;
-		results = materializeAll([...pendingDefaultEvents]);
-	} else {
-		pendingDefaultEvents = null;
-		results = materializeAll(eventLog);
+		const initResult = initWorkspaceState(workspace);
+		if (isFail(initResult)) return initResult;
+
+		patchState({
+			hasProject: false,
+			mode: Mode.DEFAULT,
+		});
+
+		return succeeded('Booted uninitialized workspace placeholder', null);
 	}
+
+	const results = materializeAll(eventLog);
 
 	const failures = results.filter(isFail);
 	if (failures.length > 0) {
