@@ -908,6 +908,9 @@ export const commands: CommandLineActionEntry[] = [
 		intent: CmdIntent.Sync,
 		mode: Mode.COMMAND_LINE,
 		action: async () => {
+			if (getState().syncStatus.status === 'syncing')
+				return failed('Sync already in progress');
+
 			const navigationAnchor = captureNavigationAnchor();
 
 			setCmdInput(() => '');
