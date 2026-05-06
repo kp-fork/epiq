@@ -7,7 +7,7 @@ import {patchSettingsState} from '../../state/settings.state.js';
 import {patchState} from '../../state/state.js';
 
 export const setAutoSyncCommand = () => {
-	const selectionVal = getCmdState().commandMeta.modifier;
+	const selectionVal = getCmdState().commandMeta.inputString.trim();
 
 	if (selectionVal !== 'yes' && selectionVal !== 'no') {
 		return failed('Invalid response');

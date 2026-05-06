@@ -224,19 +224,23 @@ export const initCommand = async () => {
 
 	let successMessage = 'Project initialized!';
 
-	// 16. try - push state branch / set upstream
+	// 16. try - push original branch first.
+	// Order is important for empty remotes: the first pushed branch may become the inferred default branch.
+	const pushOriginalResult = await execGit({
+		cwd: repoRoot,
+		args: ['push', '-u', 'origin', 'HEAD'],
+	});
+	if (isFail(pushOriginalResult)) {
+		successMessage += ` Warn: [init:16] ${pushOriginalResult.message}`;
+	}
+
+	// 17. try - push state branch / set upstream
 	const pushStateResult = await pushStateBranch({
 		repoRoot,
 		stateBranchRoot,
 	});
 	if (isFail(pushStateResult)) {
-		successMessage += ` Warn: [init:16] ${pushStateResult.message}`;
-	}
-
-	// 17. try - push original branch
-	const pushOriginalResult = await git.push({cwd: repoRoot});
-	if (isFail(pushOriginalResult)) {
-		successMessage += ` Warn: [init:17] ${pushOriginalResult.message}`;
+		successMessage += ` Warn: [init:17] ${pushStateResult.message}`;
 	}
 
 	// 18. boot app

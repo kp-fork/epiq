@@ -71,7 +71,7 @@ describe('event boot', () => {
 	it('creates the default workspace events', () => {
 		const result = createDefaultEvents({
 			userId: 'userId',
-			userName: 'userName',
+			userName: 'username',
 		});
 
 		expect(isFail(result)).toBe(false);

@@ -1,22 +1,16 @@
 import {ulid} from 'ulid';
 import {exportBoardLayout} from '../../export/export.js';
-import {syncEpiqWithRemote} from '../../git/sync.js';
 import {navigationUtils} from '../actions/default/navigation-action-utils.js';
-import {
-	captureNavigationAnchor,
-	restoreNavigationAnchor,
-} from '../actions/default/restore-navigation.js';
 import {setConfig} from '../config/user-config.js';
 import {createIssueEvents} from '../event/common-events.js';
 import {getEventTime} from '../event/date-utils.js';
-import {bootStateFromEventLog} from '../event/event-boot.js';
 import {loadMergedEvents, splitEventsAtTime} from '../event/event-load.js';
 import {
 	materializeAndPersist,
 	materializeAndPersistAll,
 } from '../event/event-materialize-and-persist.js';
 import {materializeAll} from '../event/event-materialize.js';
-import {getPersistFileName, resolveActorId} from '../event/event-persist.js';
+import {resolveActorId} from '../event/event-persist.js';
 import {AppEvent} from '../event/event.model.js';
 import {resolveReopenParentFromLog} from '../event/log-utils.js';
 import {CLOSED_SWIMLANE_ID} from '../event/static-ids.js';
@@ -29,7 +23,7 @@ import {
 	resolveAndPersistRankForCreate,
 	resolveAndPersistRankForMove,
 } from '../repository/rank.js';
-import {getCmdArg, getCmdState, setCmdInput} from '../state/cmd.state.js';
+import {getCmdArg, getCmdState} from '../state/cmd.state.js';
 import {getSettingsState, patchSettingsState} from '../state/settings.state.js';
 import {
 	getRenderedChildren,
@@ -38,10 +32,7 @@ import {
 	resetState,
 	updateState,
 } from '../state/state.js';
-import {
-	resolveClosestEpiqProjectRoot,
-	resolveClosestEpiqRoot,
-} from '../storage/paths.js';
+import {resolveClosestEpiqRoot} from '../storage/paths.js';
 import {CmdKeywords} from './cmd-keywords.js';
 import {CmdIntent} from './command-meta.js';
 import {
@@ -49,11 +40,12 @@ import {
 	EditModifiers,
 	getCmdModifiers,
 } from './command-modifiers.js';
-import {editCommand} from './commands/edit.js';
-import {initCommand} from './commands/init.js';
-import {moveCommand} from './commands/move.js';
-import {setAutoSyncDurationCommand} from './commands/set-auto-sync-duration.js';
-import {setAutoSyncCommand} from './commands/set-auto-sync.js';
+import {editCommand} from './commands/edit.cmd.js';
+import {initCommand} from './commands/init.cmd.js';
+import {moveCommand} from './commands/move.cmd.js';
+import {setAutoSyncDurationCommand} from './commands/set-auto-sync-duration.cmd.js';
+import {setAutoSyncCommand} from './commands/set-auto-sync.cmd.js';
+import {syncCommand} from './commands/sync.cmd.js';
 import {parsePeekDateInput} from './validate-date.js';
 
 const findTagByName = (name: string) =>
@@ -677,80 +669,7 @@ export const commands: CommandLineActionEntry[] = [
 	{
 		intent: CmdIntent.Sync,
 		mode: Mode.COMMAND_LINE,
-		action: async () => {
-			if (getState().syncStatus.status === 'syncing')
-				return failed('Sync already in progress');
-
-			const navigationAnchor = captureNavigationAnchor();
-
-			setCmdInput(() => '');
-
-			patchState({
-				syncStatus: {
-					msg: 'Syncing',
-					status: 'syncing',
-				},
-			});
-
-			const {userId, userName} = getSettingsState();
-			if (!userId) return failed('Unable to resolve userId');
-			if (!userName) return failed('Unable to resolve userName');
-
-			const userRes = resolveActorId();
-			if (isFail(userRes) || !userRes.value) {
-				return failed('Unable to resolve event log path');
-			}
-
-			const ownEventFileName = getPersistFileName(userRes.value);
-
-			const syncResult = await syncEpiqWithRemote({
-				ownEventFileName,
-			});
-
-			if (isFail(syncResult)) {
-				patchState({
-					syncStatus: {
-						msg: syncResult.message,
-						status: 'outOfSync',
-					},
-				});
-
-				return failed(`Unable to sync state. ${syncResult.message}`);
-			}
-
-			const epiqRootDirResult = resolveClosestEpiqProjectRoot(process.cwd());
-			if (isFail(epiqRootDirResult)) return epiqRootDirResult;
-
-			const allLoadedEventsResult = loadMergedEvents(epiqRootDirResult.value);
-			if (isFail(allLoadedEventsResult)) {
-				return failed(
-					`Unable to load events. ${allLoadedEventsResult.message}`,
-				);
-			}
-
-			const bootResult = bootStateFromEventLog({
-				eventLog: allLoadedEventsResult.value,
-				hasProject: true,
-			});
-			if (isFail(bootResult)) {
-				return failed(`Unable to boot synced state. ${bootResult.message}`);
-			}
-
-			patchState({
-				hasProject: true,
-				syncStatus: {
-					msg: 'Synced',
-					status: 'synced',
-				},
-				mode: Mode.DEFAULT,
-			});
-
-			// Restore navigation
-			const restoreResult = restoreNavigationAnchor(navigationAnchor);
-			if (isFail(restoreResult)) return restoreResult;
-
-			return succeeded('Synced', true);
-		},
+		action: syncCommand,
 	},
 	{
 		intent: CmdIntent.Peek,
