@@ -1,3 +1,4 @@
+import {MIN_AUTOSYNC_DURATION_MS} from '../../git/auto-sync.js';
 import {
 	getUserSetupStatus,
 	isRepositoryInitialized,
@@ -28,6 +29,8 @@ const GLOBAL_COMMANDS = [
 	CmdKeywords.SET_VIEW,
 	CmdKeywords.SET_EDITOR,
 	CmdKeywords.SET_USERNAME,
+	CmdKeywords.SET_AUTOSYNC,
+	CmdKeywords.SET_AUTOSYNC_DEBOUNCE_MS,
 ];
 
 const EDIT_COMMANDS = [
@@ -165,6 +168,7 @@ export const getCmdModifiers = (keyword: CmdKeyword): string[] => {
 		[CmdKeywords.SET_EDITOR]: [...editorConfig],
 		[CmdKeywords.SET_USERNAME]: [],
 		[CmdKeywords.SET_AUTOSYNC]: ['yes', 'no'] satisfies YesNo[],
+		[CmdKeywords.SET_AUTOSYNC_DEBOUNCE_MS]: [],
 	};
 
 	return modifiers[keyword] ?? [];

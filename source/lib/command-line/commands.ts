@@ -6,12 +6,6 @@ import {
 	captureNavigationAnchor,
 	restoreNavigationAnchor,
 } from '../actions/default/restore-navigation.js';
-import {
-	getMovePendingState,
-	moveChildWithinParent,
-	moveNodeToSiblingContainer,
-	setMovePendingState,
-} from '../actions/move/move-actions-utils.js';
 import {setConfig} from '../config/user-config.js';
 import {createIssueEvents} from '../event/common-events.js';
 import {getEventTime} from '../event/date-utils.js';
@@ -23,7 +17,7 @@ import {
 } from '../event/event-materialize-and-persist.js';
 import {materializeAll} from '../event/event-materialize.js';
 import {getPersistFileName, resolveActorId} from '../event/event-persist.js';
-import {AppEvent, MovePosition} from '../event/event.model.js';
+import {AppEvent} from '../event/event.model.js';
 import {resolveReopenParentFromLog} from '../event/log-utils.js';
 import {CLOSED_SWIMLANE_ID} from '../event/static-ids.js';
 import {CommandLineActionEntry, Mode} from '../model/action-map.model.js';
@@ -32,13 +26,11 @@ import {isTicketNode} from '../model/context.model.js';
 import {
 	failed,
 	isFail,
-	Result,
 	resultStatuses,
 	succeeded,
 } from '../model/result-types.js';
 import {findAncestor, nodeRepo} from '../repository/node-repo.js';
 import {
-	getOrderedChildren,
 	resolveAndPersistRankForCreate,
 	resolveAndPersistRankForMove,
 } from '../repository/rank.js';
@@ -61,8 +53,10 @@ import {CmdIntent} from './command-meta.js';
 import {getCmdModifiers} from './command-modifiers.js';
 import {editCommand} from './commands/edit.js';
 import {initCommand} from './commands/init.js';
+import {moveCommand} from './commands/move.js';
+import {setAutoSyncDurationCommand} from './commands/set-auto-sync-duration.js';
+import {setAutoSyncCommand} from './commands/set-auto-sync.js';
 import {parsePeekDateInput} from './validate-date.js';
-import {yesNoToBoolean} from '../config/setup-utils.js';
 
 const findTagByName = (name: string) =>
 	Object.values(getState().tags).find(tag => tag.name === name);
@@ -77,146 +71,7 @@ export const commands: CommandLineActionEntry[] = [
 		systemOnly: true,
 		intent: CmdIntent.Move,
 		mode: Mode.COMMAND_LINE,
-		action: () => {
-			const userRes = resolveActorId();
-			if (isFail(userRes)) return failed('Unable to resolve user ID');
-
-			const {modifier} = getCmdState().commandMeta;
-
-			const syncNavigationToPendingMove = (): Result<null> => {
-				const pendingMoveState = getMovePendingState();
-				if (!pendingMoveState) return failed('No pending move state');
-
-				const movedNodeId = pendingMoveState.payload.id;
-				const movedNode = getState().nodes[movedNodeId];
-				if (!movedNode) return failed('Moved node not found');
-
-				const parentId = pendingMoveState.payload.parent;
-				const parent = getState().nodes[parentId];
-				if (!parent) return failed('Move parent not found');
-
-				const selectedIndex = getRenderedChildren(parentId).findIndex(
-					x => x.id === movedNodeId,
-				);
-				if (selectedIndex === -1) {
-					return failed('Moved node not found among rendered children');
-				}
-
-				navigationUtils.navigate({currentNode: parent, selectedIndex});
-				return succeeded('Synchronized navigation to moved node', null);
-			};
-
-			const applyMovePreview = (moveResult: Result<unknown>): Result<null> => {
-				if (isFail(moveResult)) return failed(moveResult.message);
-
-				const navResult = syncNavigationToPendingMove();
-				if (isFail(navResult)) return failed(navResult.message);
-
-				return succeeded('Updated move preview', null);
-			};
-
-			const {currentNode, selectedIndex} = getState();
-			const targetNode = getRenderedChildren(currentNode.id)[selectedIndex];
-
-			if (!targetNode) {
-				patchState({mode: Mode.DEFAULT});
-				return failed('No move target');
-			}
-
-			if (modifier === 'start') {
-				if (targetNode.readonly) return failed('Target node is read-only');
-				if (selectedIndex === -1) return failed('No item selected');
-				if (!targetNode.parentNodeId) return failed('Target has no parent');
-
-				const siblings = getOrderedChildren(targetNode.parentNodeId);
-				const currentIndex = siblings.findIndex(({id}) => id === targetNode.id);
-
-				if (currentIndex === -1) {
-					return failed('Target not found among siblings');
-				}
-
-				const previousSibling = siblings[currentIndex - 1];
-				const nextSibling = siblings[currentIndex + 1];
-
-				const position: MovePosition =
-					nextSibling != null
-						? {at: 'before', sibling: nextSibling.id}
-						: previousSibling != null
-						? {at: 'after', sibling: previousSibling.id}
-						: {at: 'start'};
-
-				const rankResult = resolveAndPersistRankForMove(
-					targetNode.parentNodeId,
-					targetNode.id,
-					position,
-					userRes.value,
-				);
-
-				if (isFail(rankResult)) return rankResult;
-
-				setMovePendingState({
-					id: ulid(),
-					action: 'move.node',
-					payload: {
-						id: targetNode.id,
-						parent: targetNode.parentNodeId,
-						rank: rankResult.value,
-					},
-					...userRes.value,
-				});
-
-				patchState({mode: Mode.MOVE});
-
-				const navResult = syncNavigationToPendingMove();
-				if (isFail(navResult)) return failed(navResult.message);
-
-				return succeeded('Move initialized', null);
-			}
-
-			if (modifier === 'next') {
-				patchState({mode: Mode.MOVE});
-				return applyMovePreview(moveChildWithinParent(1));
-			}
-
-			if (modifier === 'previous') {
-				patchState({mode: Mode.MOVE});
-				return applyMovePreview(moveChildWithinParent(-1));
-			}
-
-			if (modifier === 'to-next') {
-				patchState({mode: Mode.MOVE});
-				return applyMovePreview(moveNodeToSiblingContainer(1));
-			}
-
-			if (modifier === 'to-previous') {
-				patchState({mode: Mode.MOVE});
-				return applyMovePreview(moveNodeToSiblingContainer(-1));
-			}
-
-			if (modifier === 'confirm') {
-				patchState({mode: Mode.DEFAULT});
-
-				const pendingMoveState = getMovePendingState();
-				if (!pendingMoveState) return failed('No pending move to confirm');
-
-				const result = materializeAndPersist(pendingMoveState);
-				if (isFail(result)) return result;
-
-				const navResult = syncNavigationToPendingMove();
-				if (isFail(navResult)) return failed(navResult.message);
-
-				setMovePendingState(null);
-				return succeeded('Moved item', null);
-			}
-
-			if (modifier === 'cancel') {
-				setMovePendingState(null);
-				patchState({mode: Mode.DEFAULT});
-				return succeeded('Cancelling move', null);
-			}
-
-			return failed('Invalid move modifier');
-		},
+		action: moveCommand,
 	},
 	{
 		intent: CmdIntent.Delete,
@@ -1098,22 +953,11 @@ export const commands: CommandLineActionEntry[] = [
 	{
 		intent: CmdIntent.SetAutoSync,
 		mode: Mode.COMMAND_LINE,
-		action: () => {
-			const selectionVal = getCmdState().commandMeta.modifier;
-
-			if (selectionVal !== 'yes' && selectionVal !== 'no') {
-				return failed('Invalid response');
-			}
-
-			const selection = yesNoToBoolean(selectionVal);
-			const persistResult = setConfig({autoSync: selection});
-
-			if (isFail(persistResult)) return persistResult;
-
-			patchSettingsState({autoSync: selection});
-			patchState({mode: Mode.DEFAULT});
-
-			return succeeded(`Auto sync set to "${selectionVal}"`, null);
-		},
+		action: setAutoSyncCommand,
+	},
+	{
+		intent: CmdIntent.SetAutoSyncDebounceMs,
+		mode: Mode.COMMAND_LINE,
+		action: setAutoSyncDurationCommand,
 	},
 ];

@@ -62,13 +62,13 @@ vi.mock('../lib/state/state.js', () => ({
 }));
 
 import {ulid} from 'ulid';
+import {CmdIntent} from '../lib/command-line/command-meta.js';
+import {commands} from '../lib/command-line/commands.js';
 import {materializeAndPersist} from '../lib/event/event-materialize-and-persist.js';
+import {failed, Result, succeeded} from '../lib/model/result-types.js';
 import {findAncestor, nodeRepo} from '../lib/repository/node-repo.js';
 import {getCmdState} from '../lib/state/cmd.state.js';
 import {getRenderedChildren, getState} from '../lib/state/state.js';
-import {CmdIntent} from '../lib/command-line/command-meta.js';
-import {failed, Result, succeeded} from '../lib/model/result-types.js';
-import {commands} from '../lib/command-line/commands.js';
 
 const mockedUlid = vi.mocked(ulid);
 const mockedMaterializeAndPersist = vi.mocked(materializeAndPersist);

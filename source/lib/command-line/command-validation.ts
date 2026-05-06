@@ -19,6 +19,12 @@ import {CmdValidity, cmdValidity} from './cmd-validity.js';
 import {getCmdModifiers} from './command-modifiers.js';
 import {isDateWithinPeekHorizon, parsePeekDateInput} from './validate-date.js';
 import {getSettingsState} from '../state/settings.state.js';
+import {
+	MIN_AUTOSYNC_DURATION_MS,
+	parseAutoSyncDebounceMs,
+} from '../../git/auto-sync.js';
+import {theme} from '../theme/themes.js';
+import {booleanToYesNo} from '../config/setup-utils.js';
 
 const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE'];
 
@@ -102,10 +108,13 @@ const buildHint = ({
 		(a, b) => getWordGradientPosition(a) - getWordGradientPosition(b),
 	);
 
-	const hintOptions = sortedByGradient.slice(0, noOfHints).map(getGradientWord);
+	const hintOptions = sortedByGradient.slice(0, noOfHints);
+	const withoutColonPrefix = hintOptions.map(x => x.split(':')[1] ?? x);
+
+	const coloredOptions = withoutColonPrefix.map(getGradientWord).join(' ');
 
 	const optionsStr =
-		hintOptions.length > minLengthForHints ? hintOptions.join(' ') : '';
+		coloredOptions.length > minLengthForHints ? coloredOptions : '';
 	return optionsStr ? `${prefix}${optionsStr}${postfix}` : '';
 };
 
@@ -291,11 +300,9 @@ const validators: Record<CmdKeyword, Validator> = {
 			wordList = [
 				...new Set(
 					wordList.flatMap(
-						word =>
-							word
-								.match(matchColonSeparatedCommand)
-								?.join('')
-								.replace(':', '') ?? word,
+						w =>
+							w.match(matchColonSeparatedCommand)?.join('').replace(':', '') ??
+							w,
 					),
 				),
 			];
@@ -434,9 +441,6 @@ const validators: Record<CmdKeyword, Validator> = {
 
 	// Settings
 	[CmdKeywords.SET_EDITOR]: args => {
-		logger.debug(
-			`Validating command: ${args.command} ${args.modifier} ${args.inputString}`,
-		);
 		const wordList = getCmdModifiers(CmdKeywords.SET_EDITOR);
 
 		return !args.modifier
@@ -471,16 +475,46 @@ const validators: Record<CmdKeyword, Validator> = {
 	[CmdKeywords.SYNC]: () => valid(CONFIRM_MSG),
 	[CmdKeywords.SET_AUTOSYNC]: args => {
 		const wordList = getCmdModifiers(CmdKeywords.SET_AUTOSYNC);
-
+		const currentAutoSyncStatus = getSettingsState().autoSync;
 		return requireOneIn({
 			list: getCmdModifiers(CmdKeywords.SET_AUTOSYNC),
 			hint: buildHint({
-				prefix: 'auto-sync state (recommended) ',
+				prefix: `should auto-sync (recommended), currently: ${booleanToYesNo(
+					currentAutoSyncStatus,
+				)} `,
 				wordList,
 				noOfHints: 3,
 				inputString: args.inputString,
 			}),
 		})(args);
+	},
+	[CmdKeywords.SET_AUTOSYNC_DEBOUNCE_MS]: args => {
+		const currentDuration = getSettingsState().autoSyncIntervalMs;
+		const duration = parseAutoSyncDebounceMs(args.inputString);
+		const examples = getCmdModifiers(CmdKeywords.SET_AUTOSYNC_DEBOUNCE_MS);
+
+		if (
+			!args.inputString.trim() ||
+			duration === null ||
+			duration < MIN_AUTOSYNC_DURATION_MS
+		) {
+			const hint = buildHint({
+				prefix: ' examples: ',
+				wordList: examples,
+				minLengthForHints: 0,
+				inputString: args.inputString,
+			});
+
+			return invalid({
+				message:
+					`provide duration above ${MIN_AUTOSYNC_DURATION_MS}ms. ` +
+					`current duration: ${currentDuration}ms.` +
+					hint,
+				completionWordList: examples,
+			});
+		}
+
+		return valid(CONFIRM_MSG);
 	},
 };
 

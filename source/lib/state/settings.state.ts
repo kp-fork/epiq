@@ -4,6 +4,7 @@ export type User = {
 };
 
 export type SettingsState = {
+	autoSyncIntervalMs: number | null;
 	autoSync: boolean | null;
 	preferredEditor: string | null;
 	userName: string | null;
@@ -11,6 +12,7 @@ export type SettingsState = {
 };
 
 let settingsState: SettingsState = {
+	autoSyncIntervalMs: null,
 	autoSync: null,
 	preferredEditor: null,
 	userName: null,
@@ -27,13 +29,4 @@ export const patchSettingsState = (
 		...patch,
 	};
 	return settingsState;
-};
-
-export const resetSettingsState = (): void => {
-	settingsState = {
-		autoSync: null,
-		preferredEditor: null,
-		userName: null,
-		userId: null,
-	};
 };

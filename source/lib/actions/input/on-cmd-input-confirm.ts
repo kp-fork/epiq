@@ -63,11 +63,21 @@ export const onConfirmCommandLineSequenceInput = async ({
 		});
 	}
 
-	const commandResult = await actionMeta.action(actionMeta, {
-		command,
-		inputString,
-		modifier,
-	});
+	let commandResult: Result;
+
+	try {
+		commandResult = await actionMeta.action(actionMeta, {
+			command,
+			inputString,
+			modifier,
+		});
+	} catch (error) {
+		return cmdResultToValidationState({
+			status: resultStatuses.Fail,
+			message: error instanceof Error ? error.message : 'Command failed',
+			value: null,
+		});
+	}
 
 	if (isFail(commandResult)) {
 		return cmdResultToValidationState(commandResult);
@@ -80,5 +90,5 @@ export const onConfirmCommandLineSequenceInput = async ({
 		queueAutoSync();
 	}
 
-	return cmdResultToValidationState(commandResult);
+	return commandResult;
 };

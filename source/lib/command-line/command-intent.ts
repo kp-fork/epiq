@@ -50,6 +50,8 @@ export const getCommandIntent = (command: string): CommandIntent => {
 			return CmdIntent.SetView;
 		case CmdKeywords.SET_AUTOSYNC:
 			return CmdIntent.SetAutoSync;
+		case CmdKeywords.SET_AUTOSYNC_DEBOUNCE_MS:
+			return CmdIntent.SetAutoSyncDebounceMs;
 
 		// Git
 		case CmdKeywords.SYNC:

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
-import {failSync, setSynced, setSyncing} from '../lib/state/sync-stat.js';
+import {failSync, setSynced, setSyncing} from '../lib/state/sync-state.js';
 import {getStateBranch} from './git-constants.js';
 import {
 	ensureStateBranchLayout,

@@ -3,20 +3,55 @@ import {
 	resolveActorId,
 } from '../lib/event/event-persist.js';
 import {failed, isFail} from '../lib/model/result-types.js';
+import {getSettingsState} from '../lib/state/settings.state.js';
 import {getState} from '../lib/state/state.js';
 import {syncEpiqWithRemote} from './sync.js';
 
-const AUTO_SYNC_INTERVAL_MS = 15_000;
+export const MIN_AUTOSYNC_DURATION_MS = 3_000;
+
+export const parseAutoSyncDebounceMs = (value: string) => {
+	const parsed = Number(value.trim());
+
+	if (!Number.isFinite(parsed)) return null;
+	if (!Number.isInteger(parsed)) return null;
+	if (parsed < MIN_AUTOSYNC_DURATION_MS) return null;
+
+	return parsed;
+};
 
 let lastAutoSyncStartedAt = 0;
 let queuedAutoSyncTimer: NodeJS.Timeout | undefined;
 let autoSyncInFlight = false;
+let pendingAutoSync = false;
 
 const isSyncing = () =>
 	autoSyncInFlight || getState().syncStatus.status === 'syncing';
 
+const getAutoSyncDelay = () => {
+	const intervalMs = getSettingsState().autoSyncIntervalMs ?? 15_000;
+	const elapsed = Date.now() - lastAutoSyncStartedAt;
+	return Math.max(0, intervalMs - elapsed);
+};
+
+const scheduleQueuedAutoSync = () => {
+	if (queuedAutoSyncTimer) return;
+
+	queuedAutoSyncTimer = setTimeout(async () => {
+		queuedAutoSyncTimer = undefined;
+
+		if (isSyncing()) {
+			pendingAutoSync = true;
+			return;
+		}
+
+		pendingAutoSync = false;
+		await autoSync();
+	}, getAutoSyncDelay());
+};
+
 export const autoSync = async () => {
 	if (isSyncing()) {
+		pendingAutoSync = true;
 		return failed('Sync already in progress');
 	}
 
@@ -33,23 +68,17 @@ export const autoSync = async () => {
 		return await syncEpiqWithRemote({ownEventFileName});
 	} finally {
 		autoSyncInFlight = false;
+
+		if (pendingAutoSync) {
+			scheduleQueuedAutoSync();
+		}
 	}
 };
 
 export const queueAutoSync = () => {
+	pendingAutoSync = true;
+
 	if (isSyncing()) return;
 
-	const now = Date.now();
-	const elapsed = now - lastAutoSyncStartedAt;
-	const delay = Math.max(0, AUTO_SYNC_INTERVAL_MS - elapsed);
-
-	if (queuedAutoSyncTimer) return;
-
-	queuedAutoSyncTimer = setTimeout(async () => {
-		queuedAutoSyncTimer = undefined;
-
-		if (isSyncing()) return;
-
-		await autoSync();
-	}, delay);
+	scheduleQueuedAutoSync();
 };
