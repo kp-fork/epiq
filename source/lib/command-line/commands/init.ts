@@ -92,7 +92,7 @@ export const initCommand = async () => {
 
 	// 5. resolve repo root/user ids from ~/.epiq-global/config.json
 	const setupStatus = getUserSetupStatus();
-	if (!setupStatus.isSetup || !setupStatus.userName) {
+	if (!setupStatus.isSetupDone || !setupStatus.userName) {
 		return failAt(
 			5,
 			'Missing Epiq user configuration (userId / userName). Run setup first.',

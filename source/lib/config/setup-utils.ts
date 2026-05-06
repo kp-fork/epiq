@@ -4,21 +4,27 @@ import {getSettingsState} from '../state/settings.state.js';
 import {resolveClosestEpiqProjectRoot} from '../storage/paths.js';
 
 export const getUserSetupStatus = (): {
-	hasPreferredEditor: boolean;
-	hasUserName: boolean;
+	isSetupDone: boolean;
+	isSetPreferredEditor: boolean;
+	isSetUserName: boolean;
+	isSetAutoSync: boolean;
 	userName: string | null;
 	preferredEditor: string | null;
-	isSetup: boolean;
+	autoSync: boolean | null;
 } => {
 	const settings = getSettingsState();
-	const hasUserName = Boolean(settings.userName?.trim());
-	const hasPreferredEditor = Boolean(settings.preferredEditor?.trim());
+	const isSetUserName = Boolean(settings.userName?.trim());
+	const isSetPreferredEditor = Boolean(settings.preferredEditor?.trim());
+	const isSetAutoSync =
+		settings.autoSync === true || settings.autoSync === false;
 	return {
-		isSetup: hasPreferredEditor && hasUserName,
-		hasPreferredEditor,
-		hasUserName,
+		isSetupDone: isSetPreferredEditor && isSetUserName && isSetAutoSync,
+		isSetPreferredEditor,
+		isSetUserName,
 		userName: settings.userName,
 		preferredEditor: settings.preferredEditor,
+		autoSync: settings.autoSync === undefined ? null : settings.autoSync,
+		isSetAutoSync: isSetAutoSync,
 	};
 };
 export const isRepositoryInitialized = () => {
@@ -28,4 +34,24 @@ export const isRepositoryInitialized = () => {
 	const projectFileResult = readProjectFile(repoRootResult.value);
 
 	return isSuccess(projectFileResult);
+};
+
+export type YesNo = 'yes' | 'no';
+
+export const booleanToYesNo = (
+	value: boolean | null | undefined,
+): YesNo | null => {
+	if (value === true) return 'yes';
+	if (value === false) return 'no';
+
+	return null;
+};
+
+export const yesNoToBoolean = (
+	value: string | null | undefined,
+): boolean | null => {
+	if (value === 'yes') return true;
+	if (value === 'no') return false;
+
+	return null;
 };

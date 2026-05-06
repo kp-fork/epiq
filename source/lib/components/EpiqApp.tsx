@@ -29,25 +29,17 @@ export default function EpiqApp({width, height}: EpiqAppProps) {
 		);
 	}
 
-	const {isSetup, hasPreferredEditor, hasUserName, userName, preferredEditor} =
-		getUserSetupStatus();
+	const {isSetupDone} = getUserSetupStatus();
 
-	const isSetupMode = !isSetup;
-	const isUninitializedRepo = isSetup && !state.hasProject;
+	const isSetupMode = !isSetupDone;
+	const isUninitializedRepo = isSetupDone && !state.hasProject;
 
 	if (isSetupMode) {
 		return (
 			<Box flexDirection="column">
 				<Box flexDirection="column">
 					<Topbar hideBreadCrumb filters={filters} />
-					<SettingsUI
-						height={height}
-						width={width}
-						hasUserName={hasUserName}
-						hasPreferredEditor={hasPreferredEditor}
-						userName={userName ?? ''}
-						preferredEditor={preferredEditor ?? ''}
-					/>
+					<SettingsUI height={height} width={width} />
 				</Box>
 
 				<ContextBar

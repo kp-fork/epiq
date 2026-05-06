@@ -1,6 +1,6 @@
 import {CmdKeywords} from '../../command-line/cmd-keywords.js';
 import {ActionEntry, Mode} from '../../model/action-map.model.js';
-import {failed, succeeded} from '../../model/result-types.js';
+import {succeeded} from '../../model/result-types.js';
 import {FieldNames} from '../../repository/fielNames.js';
 import {getOrderedChildren} from '../../repository/rank.js';
 import {setCmdInput} from '../../state/cmd.state.js';

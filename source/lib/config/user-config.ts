@@ -18,7 +18,7 @@ const EpiqConfigSchema = z
 		preferredEditor: z.string().optional(),
 		userName: z.string().optional(),
 		userId: z.string().optional(),
-		autoSync: z.boolean().optional(),
+		autoSync: z.boolean().nullable().optional(),
 	})
 	.strict();
 

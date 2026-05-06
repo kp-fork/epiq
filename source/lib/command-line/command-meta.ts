@@ -62,9 +62,7 @@ export const getCmdMeta = (
 	].validate(command, modifier, inputString);
 
 	const wordList =
-		target === 'command'
-			? Object.values(CmdKeywords)
-			: command && parsed.target === 'modifier'
+		target === 'command' || target === 'modifier'
 			? getCmdModifiers(command)
 			: DEFAULT_WORDS;
 

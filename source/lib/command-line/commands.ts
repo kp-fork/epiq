@@ -62,6 +62,7 @@ import {getCmdModifiers} from './command-modifiers.js';
 import {editCommand} from './commands/edit.js';
 import {initCommand} from './commands/init.js';
 import {parsePeekDateInput} from './validate-date.js';
+import {yesNoToBoolean} from '../config/setup-utils.js';
 
 const findTagByName = (name: string) =>
 	Object.values(getState().tags).find(tag => tag.name === name);
@@ -457,28 +458,6 @@ export const commands: CommandLineActionEntry[] = [
 			patchState({mode: Mode.DEFAULT});
 
 			return succeeded(`Editor configuration set to "${editor}"`, null);
-		},
-	},
-	{
-		intent: CmdIntent.SetAutoSync,
-		mode: Mode.COMMAND_LINE,
-		action: () => {
-			const selectionVal = getCmdState().commandMeta.modifier;
-			if (selectionVal !== 'true' && selectionVal !== 'false') {
-				return failed('Invalid response');
-			}
-			const selection: boolean = selectionVal.toLowerCase() === 'true';
-
-			const persistResult = setConfig({autoSync: selection});
-			if (isFail(persistResult)) return persistResult;
-
-			patchSettingsState({
-				autoSync: selection,
-			});
-
-			patchState({mode: Mode.DEFAULT});
-
-			return succeeded(`Auto synchronization set to "${selection}"`, null);
 		},
 	},
 	{
@@ -1111,6 +1090,27 @@ export const commands: CommandLineActionEntry[] = [
 		action: async () => {
 			navigationUtils.exit();
 			return succeeded('Exit successful', true);
+		},
+	},
+	{
+		intent: CmdIntent.SetAutoSync,
+		mode: Mode.COMMAND_LINE,
+		action: () => {
+			const selectionVal = getCmdState().commandMeta.modifier;
+
+			if (selectionVal !== 'yes' && selectionVal !== 'no') {
+				return failed('Invalid response');
+			}
+
+			const selection = yesNoToBoolean(selectionVal);
+			const persistResult = setConfig({autoSync: selection});
+
+			if (isFail(persistResult)) return persistResult;
+
+			patchSettingsState({autoSync: selection});
+			patchState({mode: Mode.DEFAULT});
+
+			return succeeded(`Auto sync set to "${selectionVal}"`, null);
 		},
 	},
 ];

@@ -3,6 +3,7 @@ import {nodeRepo} from '../repository/node-repo.js';
 import {
 	getUserSetupStatus,
 	isRepositoryInitialized,
+	YesNo,
 } from '../config/setup-utils.js';
 import {AnyContext, NavNodeCtx} from '../model/context.model.js';
 import {getState} from '../state/state.js';
@@ -73,9 +74,14 @@ const getNewModifiers = (context: AnyContext): string[] => {
 const getAvailableBaseCommands = (): CmdKeyword[] => {
 	const {currentNode, selectedNode, readOnly} = getState();
 
-	const isSetupComplete = getUserSetupStatus().isSetup;
-	if (!isSetupComplete) {
-		return [CmdKeywords.HELP, CmdKeywords.SET_EDITOR, CmdKeywords.SET_USERNAME];
+	const {isSetupDone} = getUserSetupStatus();
+	if (!isSetupDone) {
+		return [
+			CmdKeywords.HELP,
+			CmdKeywords.SET_EDITOR,
+			CmdKeywords.SET_USERNAME,
+			CmdKeywords.SET_AUTOSYNC,
+		];
 	}
 
 	if (!isRepositoryInitialized()) {
@@ -124,7 +130,6 @@ export const getCmdModifiers = (keyword: CmdKeyword): string[] => {
 
 		[CmdKeywords.PEEK]: [...generatePeekOffsetHints(), 'now', 'prev', 'next'],
 
-		[CmdKeywords.SET_USERNAME]: [],
 		[CmdKeywords.SET_DESCRIPTION]: ['confirm'],
 		[CmdKeywords.DELETE]: ['confirm'],
 		[CmdKeywords.RE_OPEN_ISSUE]: ['confirm'],
@@ -139,27 +144,26 @@ export const getCmdModifiers = (keyword: CmdKeyword): string[] => {
 			'to-previous',
 			'cancel',
 		],
-
 		[CmdKeywords.FILTER]: ['tag', 'assignee', 'description', 'title', 'clear'],
-		[CmdKeywords.SET_VIEW]: ['dense', 'wide'],
-		[CmdKeywords.SET_EDITOR]: [...editorConfig],
-
 		[CmdKeywords.TAG]: [
 			...new Set([...Object.keys(TAGS_DEFAULT), ...nodeRepo.getExistingTags()]),
 		],
-
 		[CmdKeywords.UNTAG]: [
 			...(ticketTagsFromBreadCrumb()?.value?.map(({name}) => name) ?? []),
 		],
-
 		[CmdKeywords.UNASSIGN]: [
 			...(ticketAssigneesFromBreadCrumb()?.value?.map(({name}) => name) ?? []),
 		],
-
 		[CmdKeywords.ASSIGN]: nodeRepo.getExistingAssignees(),
 
 		[CmdKeywords.RENAME]: [],
 		[CmdKeywords.NEW]: getNewModifiers(currentContext),
+
+		// Settings
+		[CmdKeywords.SET_VIEW]: ['dense', 'wide'],
+		[CmdKeywords.SET_EDITOR]: [...editorConfig],
+		[CmdKeywords.SET_USERNAME]: [],
+		[CmdKeywords.SET_AUTOSYNC]: ['yes', 'no'] satisfies YesNo[],
 	};
 
 	return modifiers[keyword] ?? [];

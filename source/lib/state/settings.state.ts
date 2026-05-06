@@ -11,7 +11,7 @@ export type SettingsState = {
 };
 
 let settingsState: SettingsState = {
-	autoSync: false,
+	autoSync: null,
 	preferredEditor: null,
 	userName: null,
 	userId: null,

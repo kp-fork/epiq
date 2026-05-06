@@ -40,6 +40,7 @@ export const getCommandIntent = (command: string): CommandIntent => {
 			return CmdIntent.Move;
 		case CmdKeywords.PEEK:
 			return CmdIntent.Peek;
+
 		// Settings
 		case CmdKeywords.SET_USERNAME:
 			return CmdIntent.SetUserName;
@@ -47,6 +48,8 @@ export const getCommandIntent = (command: string): CommandIntent => {
 			return CmdIntent.SetEditor;
 		case CmdKeywords.SET_VIEW:
 			return CmdIntent.SetView;
+		case CmdKeywords.SET_AUTOSYNC:
+			return CmdIntent.SetAutoSync;
 
 		// Git
 		case CmdKeywords.SYNC:

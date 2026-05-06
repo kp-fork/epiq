@@ -1,8 +1,9 @@
 import chalk from 'chalk';
 import {safeDateFromUlid} from '../event/date-utils.js';
-import {nodeRepo} from '../repository/node-repo.js';
 import {Filter, findInBreadCrumb} from '../model/app-state.model.js';
 import {AnyContext} from '../model/context.model.js';
+import {isFail} from '../model/result-types.js';
+import {nodeRepo} from '../repository/node-repo.js';
 import {getState} from '../state/state.js';
 import {
 	getGradientWord,
@@ -13,11 +14,9 @@ import {
 	ticketAssigneesFromBreadCrumb,
 	ticketTagsFromBreadCrumb,
 } from '../utils/ticket.utils.js';
-import {getCmdModifiers} from './command-modifiers.js';
-import {isFail} from '../model/result-types.js';
+import {CmdKeyword, CmdKeywords} from './cmd-keywords.js';
 import {CmdValidity, cmdValidity} from './cmd-validity.js';
-import {CmdKeyword} from './cmd-keywords.js';
-import {CmdKeywords} from './cmd-keywords.js';
+import {getCmdModifiers} from './command-modifiers.js';
 import {isDateWithinPeekHorizon, parsePeekDateInput} from './validate-date.js';
 
 const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE'];
@@ -362,8 +361,11 @@ const validators: Record<CmdKeyword, Validator> = {
 			.map(tag => ` ${chalk.bgHex(getStringColor(tag))(' ' + tag + ' ')} `)
 			.slice(0, 10);
 
+		const existingTags = tags.join('');
 		return requireModifierOrInputStr({
-			hint: 'tag name like... ' + tags.join(''),
+			hint: existingTags.length
+				? 'existing tags ... ' + existingTags
+				: 'create tag ...',
 		})(args);
 	},
 	[CmdKeywords.UNTAG]: args => {
@@ -449,7 +451,7 @@ const validators: Record<CmdKeyword, Validator> = {
 		return !args.inputString
 			? invalid({
 					message: `Enter a username. Saved in ${chalk.bgBlack(
-						'~/.epiq-global/',
+						'~/.epiq-global/config.json',
 					)}`,
 			  })
 			: valid();
@@ -465,6 +467,19 @@ const validators: Record<CmdKeyword, Validator> = {
 			}),
 		})(args),
 	[CmdKeywords.SYNC]: () => valid(CONFIRM_MSG),
+	[CmdKeywords.SET_AUTOSYNC]: args => {
+		const wordList = getCmdModifiers(CmdKeywords.SET_AUTOSYNC);
+
+		return requireOneIn({
+			list: getCmdModifiers(CmdKeywords.SET_AUTOSYNC),
+			hint: buildHint({
+				prefix: 'auto-sync state (recommended) ',
+				wordList,
+				noOfHints: 3,
+				inputString: args.inputString,
+			}),
+		})(args);
+	},
 };
 
 type CmdValidator = {
