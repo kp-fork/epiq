@@ -10,6 +10,7 @@ import {theme} from '../theme/themes.js';
 import {Breadcrumb} from './BreadCrumb.js';
 import {FilterUI} from './Filters.js';
 import {EPIQ_VERSION} from '../../version.js';
+import {SyncStatusPill} from './SyncStatus.js';
 
 type Props = {
 	filters: Filter[];
@@ -17,9 +18,9 @@ type Props = {
 };
 
 export function Topbar({filters, hideBreadCrumb = false}: Props) {
-	const {timeMode, eventLog, unappliedEvents} = useAppState();
+	const {timeMode, eventLog, unappliedEvents, syncStatus} = useAppState();
 	const {userName, preferredEditor} = getSettingsState();
-	const topRightWidth = 40;
+	const topRightWidth = 56;
 	const breadCrumbWidth = process.stdout.columns - topRightWidth - 8;
 
 	const currentEventId = eventLog.at(-1)?.id;
@@ -55,6 +56,7 @@ export function Topbar({filters, hideBreadCrumb = false}: Props) {
 					overflow="hidden"
 					justifyContent="flex-end"
 				>
+					<SyncStatusPill syncStatus={syncStatus} />
 					<Text dimColor={true} color={theme.secondary2}>
 						{EPIQ_VERSION + ' '}
 					</Text>
