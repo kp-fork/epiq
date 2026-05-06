@@ -14,7 +14,7 @@ export const getCommandIntent = (command: string): CommandIntent => {
 			return CmdIntent.Init;
 		case CmdKeywords.DELETE:
 			return CmdIntent.Delete;
-		case CmdKeywords.SET_DESCRIPTION:
+		case CmdKeywords.EDIT_DESCRIPTION:
 			return CmdIntent.Edit;
 		case CmdKeywords.HELP:
 			return CmdIntent.ViewHelp;
@@ -30,7 +30,7 @@ export const getCommandIntent = (command: string): CommandIntent => {
 			return CmdIntent.AssignUserToTicket;
 		case CmdKeywords.UNASSIGN:
 			return CmdIntent.UnassignUserFromTicket;
-		case CmdKeywords.RENAME:
+		case CmdKeywords.EDIT_TITLE:
 			return CmdIntent.Rename;
 		case CmdKeywords.NEW:
 			return CmdIntent.NewItem;

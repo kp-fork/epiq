@@ -1,19 +1,18 @@
-import {editorConfig} from '../editor/editor-config.js';
-import {nodeRepo} from '../repository/node-repo.js';
 import {
 	getUserSetupStatus,
 	isRepositoryInitialized,
 	YesNo,
 } from '../config/setup-utils.js';
+import {editorConfig} from '../editor/editor-config.js';
 import {AnyContext, NavNodeCtx} from '../model/context.model.js';
+import {nodeRepo} from '../repository/node-repo.js';
 import {getState} from '../state/state.js';
 import {TAGS_DEFAULT} from '../static/default-tags.js';
 import {
 	ticketAssigneesFromBreadCrumb,
 	ticketTagsFromBreadCrumb,
 } from '../utils/ticket.utils.js';
-import {CmdKeyword} from './cmd-keywords.js';
-import {CmdKeywords} from './cmd-keywords.js';
+import {CmdKeyword, CmdKeywords} from './cmd-keywords.js';
 import {generatePeekOffsetHints} from './validate-date.js';
 
 const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE'];
@@ -33,7 +32,7 @@ const GLOBAL_COMMANDS = [
 
 const EDIT_COMMANDS = [
 	CmdKeywords.NEW,
-	CmdKeywords.RENAME,
+	CmdKeywords.EDIT_TITLE,
 	CmdKeywords.DELETE,
 	CmdKeywords.MOVE,
 ];
@@ -45,7 +44,7 @@ const TICKET_COMMANDS = [
 	CmdKeywords.UNASSIGN,
 	CmdKeywords.CLOSE_ISSUE,
 	CmdKeywords.RE_OPEN_ISSUE,
-	CmdKeywords.SET_DESCRIPTION,
+	CmdKeywords.EDIT_DESCRIPTION,
 ];
 
 const PRESENTATION_COMMANDS = [CmdKeywords.FILTER, CmdKeywords.PEEK];
@@ -53,12 +52,7 @@ const PRESENTATION_COMMANDS = [CmdKeywords.FILTER, CmdKeywords.PEEK];
 const COMMANDS_BY_CONTEXT: CommandMap = {
 	WORKSPACE: [...GLOBAL_COMMANDS, ...EDIT_COMMANDS],
 	BOARD: [...PRESENTATION_COMMANDS, ...GLOBAL_COMMANDS, ...EDIT_COMMANDS],
-	SWIMLANE: [
-		...PRESENTATION_COMMANDS,
-		...GLOBAL_COMMANDS,
-		...EDIT_COMMANDS,
-		...TICKET_COMMANDS,
-	],
+	SWIMLANE: [...PRESENTATION_COMMANDS, ...GLOBAL_COMMANDS, ...EDIT_COMMANDS],
 	TICKET: [...GLOBAL_COMMANDS, ...EDIT_COMMANDS, ...TICKET_COMMANDS],
 	FIELD: [...GLOBAL_COMMANDS, ...TICKET_COMMANDS],
 	FIELD_LIST: [...GLOBAL_COMMANDS, ...TICKET_COMMANDS],
@@ -72,7 +66,7 @@ const getNewModifiers = (context: AnyContext): string[] => {
 };
 
 const getAvailableBaseCommands = (): CmdKeyword[] => {
-	const {currentNode, selectedNode, readOnly} = getState();
+	const {selectedNode, readOnly, breadCrumb} = getState();
 
 	const {isSetupDone} = getUserSetupStatus();
 	if (!isSetupDone) {
@@ -97,17 +91,24 @@ const getAvailableBaseCommands = (): CmdKeyword[] => {
 		];
 	}
 
-	const currentContext = currentNode.context ?? 'WORKSPACE';
 	const selectedContext = selectedNode?.context;
 	const selectedIsEditable =
 		selectedContext && EDITABLE_NODES.includes(selectedContext);
 
-	return COMMANDS_BY_CONTEXT[currentContext].filter(command => {
-		if (
-			command === CmdKeywords.RENAME ||
-			command === CmdKeywords.DELETE ||
-			command === CmdKeywords.MOVE
-		) {
+	const commandsInBreadcrumbContext = [
+		...new Set(
+			[...breadCrumb, selectedNode]
+				.map(c => c?.context)
+				.flatMap(c => (c ? COMMANDS_BY_CONTEXT[c] : [])),
+		),
+	];
+
+	return commandsInBreadcrumbContext.filter(command => {
+		if (command === CmdKeywords.MOVE) {
+			return false;
+		}
+
+		if (command === CmdKeywords.EDIT_TITLE || command === CmdKeywords.DELETE) {
 			return selectedIsEditable;
 		}
 
@@ -130,7 +131,8 @@ export const getCmdModifiers = (keyword: CmdKeyword): string[] => {
 
 		[CmdKeywords.PEEK]: [...generatePeekOffsetHints(), 'now', 'prev', 'next'],
 
-		[CmdKeywords.SET_DESCRIPTION]: ['confirm'],
+		[CmdKeywords.EDIT_TITLE]: [],
+		[CmdKeywords.EDIT_DESCRIPTION]: ['confirm'],
 		[CmdKeywords.DELETE]: ['confirm'],
 		[CmdKeywords.RE_OPEN_ISSUE]: ['confirm'],
 		[CmdKeywords.CLOSE_ISSUE]: ['confirm'],
@@ -156,7 +158,6 @@ export const getCmdModifiers = (keyword: CmdKeyword): string[] => {
 		],
 		[CmdKeywords.ASSIGN]: nodeRepo.getExistingAssignees(),
 
-		[CmdKeywords.RENAME]: [],
 		[CmdKeywords.NEW]: getNewModifiers(currentContext),
 
 		// Settings

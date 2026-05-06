@@ -18,6 +18,7 @@ import {CmdKeyword, CmdKeywords} from './cmd-keywords.js';
 import {CmdValidity, cmdValidity} from './cmd-validity.js';
 import {getCmdModifiers} from './command-modifiers.js';
 import {isDateWithinPeekHorizon, parsePeekDateInput} from './validate-date.js';
+import {getSettingsState} from '../state/settings.state.js';
 
 const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE'];
 
@@ -323,9 +324,10 @@ const validators: Record<CmdKeyword, Validator> = {
 			onValue: 'provide a name...',
 		})(args),
 
-	[CmdKeywords.SET_DESCRIPTION]: () => valid(CONFIRM_MSG),
+	[CmdKeywords.EDIT_DESCRIPTION]: () =>
+		valid('<ENTER> to edit in ' + getSettingsState().preferredEditor),
 	[CmdKeywords.HELP]: () => valid(CONFIRM_MSG),
-	[CmdKeywords.RENAME]: () => {
+	[CmdKeywords.EDIT_TITLE]: () => {
 		const editableNodeTypeValidation = guardEditableNodes();
 		if (editableNodeTypeValidation.validity === 'invalid')
 			return editableNodeTypeValidation;

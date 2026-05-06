@@ -40,7 +40,7 @@ vi.mock('../lib/command-line/command-modifiers.js', () => ({
 			[CmdKeywords.TAG]: ['critical', 'frontend', 'backend'],
 			[CmdKeywords.ASSIGN]: ['john', 'jane'],
 			[CmdKeywords.HELP]: [],
-			[CmdKeywords.RENAME]: [],
+			[CmdKeywords.EDIT_TITLE]: [],
 			[CmdKeywords.NEW]: ['issue', 'swimlane', 'board'],
 		};
 		return m[keyword] ?? [];
@@ -98,8 +98,8 @@ describe('cmdValidation', () => {
 
 	describe('RENAME', () => {
 		it('accepts any input', () => {
-			const result = cmdValidation[CmdKeywords.RENAME].validate(
-				CmdKeywords.RENAME,
+			const result = cmdValidation[CmdKeywords.EDIT_TITLE].validate(
+				CmdKeywords.EDIT_TITLE,
 				'any-value',
 				'New name',
 			);
