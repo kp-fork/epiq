@@ -1,0 +1,84 @@
+import {
+	getPersistFileName,
+	resolveActorId,
+} from '../lib/event/event-persist.js';
+import {failed, isFail} from '../lib/model/result-types.js';
+import {getSettingsState} from '../lib/state/settings.state.js';
+import {getState} from '../lib/state/state.js';
+import {syncEpiqWithRemote} from './sync.js';
+
+export const MIN_AUTOSYNC_DURATION_MS = 3_000;
+
+export const parseAutoSyncDebounceMs = (value: string) => {
+	const parsed = Number(value.trim());
+
+	if (!Number.isFinite(parsed)) return null;
+	if (!Number.isInteger(parsed)) return null;
+	if (parsed < MIN_AUTOSYNC_DURATION_MS) return null;
+
+	return parsed;
+};
+
+let lastAutoSyncStartedAt = 0;
+let queuedAutoSyncTimer: NodeJS.Timeout | undefined;
+let autoSyncInFlight = false;
+let pendingAutoSync = false;
+
+const isSyncing = () =>
+	autoSyncInFlight || getState().syncStatus.status === 'syncing';
+
+const getAutoSyncDelay = () => {
+	const intervalMs = getSettingsState().autoSyncIntervalMs ?? 15_000;
+	const elapsed = Date.now() - lastAutoSyncStartedAt;
+	return Math.max(0, intervalMs - elapsed);
+};
+
+const scheduleQueuedAutoSync = () => {
+	if (queuedAutoSyncTimer) return;
+
+	queuedAutoSyncTimer = setTimeout(async () => {
+		queuedAutoSyncTimer = undefined;
+
+		if (isSyncing()) {
+			pendingAutoSync = true;
+			return;
+		}
+
+		pendingAutoSync = false;
+		await autoSync();
+	}, getAutoSyncDelay());
+};
+
+export const autoSync = async () => {
+	if (isSyncing()) {
+		pendingAutoSync = true;
+		return failed('Sync already in progress');
+	}
+
+	const userRes = resolveActorId();
+	if (isFail(userRes) || !userRes.value) {
+		return failed('Unable to resolve event log path');
+	}
+
+	autoSyncInFlight = true;
+	lastAutoSyncStartedAt = Date.now();
+
+	try {
+		const ownEventFileName = getPersistFileName(userRes.value);
+		return await syncEpiqWithRemote({ownEventFileName});
+	} finally {
+		autoSyncInFlight = false;
+
+		if (pendingAutoSync) {
+			scheduleQueuedAutoSync();
+		}
+	}
+};
+
+export const queueAutoSync = () => {
+	pendingAutoSync = true;
+
+	if (isSyncing()) return;
+
+	scheduleQueuedAutoSync();
+};

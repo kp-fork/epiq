@@ -13,14 +13,14 @@ export const SYSTEM_USER: EpiqConfig = {
 	autoSync: false,
 };
 
-const EpiqConfigSchema = z
-	.object({
-		preferredEditor: z.string().optional(),
-		userName: z.string().optional(),
-		userId: z.string().optional(),
-		autoSync: z.boolean().optional(),
-	})
-	.strict();
+const EpiqConfigSchema = z.object({
+	preferredEditor: z.string().optional(),
+	userName: z.string().optional(),
+	userId: z.string().optional(),
+	autoSync: z.boolean().nullable().optional(),
+	autoSyncDebounceMs: z.number().optional(),
+	viewMode: z.enum(['dense', 'wide']).optional(),
+});
 
 export type EpiqConfig = z.infer<typeof EpiqConfigSchema>;
 
@@ -76,6 +76,7 @@ export const readEpiqConfig = (): Result<EpiqConfig> => {
 			preferredEditor: '',
 			userId: '',
 			userName: '',
+			autoSyncIntervalMs: 15_000,
 		});
 	}
 
@@ -145,7 +146,13 @@ export const loadSettingsFromConfig = (): Result<SettingsState> => {
 		throw new Error(result.message || 'Unable to load settings');
 	}
 
-	const {preferredEditor, userName, userId, autoSync} = result.value;
+	const {
+		preferredEditor,
+		userName,
+		userId,
+		autoSync,
+		autoSyncDebounceMs: autoSyncIntervalMs,
+	} = result.value;
 
 	if (!userName || !userId) {
 		return failed(
@@ -158,5 +165,7 @@ export const loadSettingsFromConfig = (): Result<SettingsState> => {
 		userName,
 		userId,
 		autoSync: autoSync ?? false,
+		autoSyncIntervalMs: autoSyncIntervalMs ?? 15_000,
+		viewMode: 'dense',
 	});
 };

@@ -11,6 +11,7 @@ import {InitProjectUI} from './InitProjectUI.js';
 import SettingsUI from './SettingsUI.js';
 import {Topbar} from './Topbar.js';
 import {WorkspaceUI} from './WorkspaceUI.js';
+import {getSettingsState} from '../state/settings.state.js';
 
 type EpiqAppProps = {
 	height: number;
@@ -29,25 +30,17 @@ export default function EpiqApp({width, height}: EpiqAppProps) {
 		);
 	}
 
-	const {isSetup, hasPreferredEditor, hasUserName, userName, preferredEditor} =
-		getUserSetupStatus();
+	const {isSetupDone} = getUserSetupStatus();
 
-	const isSetupMode = !isSetup;
-	const isUninitializedRepo = isSetup && !state.hasProject;
+	const isSetupMode = !isSetupDone;
+	const isUninitializedRepo = isSetupDone && !state.hasProject;
 
 	if (isSetupMode) {
 		return (
 			<Box flexDirection="column">
 				<Box flexDirection="column">
 					<Topbar hideBreadCrumb filters={filters} />
-					<SettingsUI
-						height={height}
-						width={width}
-						hasUserName={hasUserName}
-						hasPreferredEditor={hasPreferredEditor}
-						userName={userName ?? ''}
-						preferredEditor={preferredEditor ?? ''}
-					/>
+					<SettingsUI height={height} width={width} />
 				</Box>
 
 				<ContextBar
@@ -101,7 +94,7 @@ export default function EpiqApp({width, height}: EpiqAppProps) {
 					currentNode={state.currentNode}
 					selectedIndex={state.selectedIndex}
 					breadCrumb={state.breadCrumb}
-					viewMode={state.viewMode}
+					viewMode={getSettingsState().viewMode ?? 'dense'}
 					mode={state.mode}
 				/>
 			</Box>

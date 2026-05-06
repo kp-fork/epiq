@@ -5,6 +5,9 @@ import {Result, succeeded} from '../model/result-types.js';
 import {CmdValidity, cmdValidity} from '../command-line/cmd-validity.js';
 import {CmdKeyword} from '../command-line/cmd-keywords.js';
 
+const isWordBoundary = (char: string | undefined) =>
+	char === commandDelimiter || char === ':';
+
 export const commandDelimiter = ' ';
 export type CurrentCmdMeta = {
 	modifier: string;
@@ -102,17 +105,17 @@ export const moveCursorPositionOfWord = (direction: 'left' | 'right') => {
 		let newPos = cursorPosition;
 
 		if (direction === 'left') {
-			while (newPos > 0 && value[newPos - 1] === ' ') {
+			while (newPos > 0 && isWordBoundary(value[newPos - 1])) {
 				newPos--;
 			}
-			while (newPos > 0 && value[newPos - 1] !== ' ') {
+			while (newPos > 0 && !isWordBoundary(value[newPos - 1])) {
 				newPos--;
 			}
 		} else {
-			while (newPos < value.length && value[newPos] !== ' ') {
+			while (newPos < value.length && !isWordBoundary(value[newPos])) {
 				newPos++;
 			}
-			while (newPos < value.length && value[newPos] === ' ') {
+			while (newPos < value.length && isWordBoundary(value[newPos])) {
 				newPos++;
 			}
 		}
@@ -143,14 +146,15 @@ export const eraseInputWord = () => {
 
 		let newCursorPos = cursorPosition;
 
-		while (newCursorPos > 0 && value[newCursorPos - 1] === ' ') {
+		while (newCursorPos > 0 && isWordBoundary(value[newCursorPos - 1])) {
 			newCursorPos--;
 		}
-		while (newCursorPos > 0 && value[newCursorPos - 1] !== ' ') {
+		while (newCursorPos > 0 && !isWordBoundary(value[newCursorPos - 1])) {
 			newCursorPos--;
 		}
 
 		const remainingValue = value.slice(cursorPosition);
+
 		return {
 			...s,
 			value: value.slice(0, newCursorPos) + remainingValue,

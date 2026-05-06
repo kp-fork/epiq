@@ -22,10 +22,7 @@ export const CmdIntent = {
 	Peek: 'peek',
 
 	// Settings
-	SetView: 'set-view',
-	SetEditor: 'set-editor',
-	SetUserName: 'set-user-name',
-	SetAutoSync: 'set-auto-sync',
+	Config: 'config',
 
 	// Add
 	NewItem: 'add-new-item',
@@ -62,9 +59,7 @@ export const getCmdMeta = (
 	].validate(command, modifier, inputString);
 
 	const wordList =
-		target === 'command'
-			? Object.values(CmdKeywords)
-			: command && parsed.target === 'modifier'
+		target === 'command' || target === 'modifier'
 			? getCmdModifiers(command)
 			: DEFAULT_WORDS;
 

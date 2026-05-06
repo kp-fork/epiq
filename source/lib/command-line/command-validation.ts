@@ -1,8 +1,16 @@
 import chalk from 'chalk';
+import {
+	MIN_AUTOSYNC_DURATION_MS,
+	parseAutoSyncDebounceMs,
+} from '../../git/auto-sync.js';
+import {booleanToYesNo, YesNo} from '../config/setup-utils.js';
+import {editorConfig} from '../editor/editor-config.js';
 import {safeDateFromUlid} from '../event/date-utils.js';
-import {nodeRepo} from '../repository/node-repo.js';
 import {Filter, findInBreadCrumb} from '../model/app-state.model.js';
 import {AnyContext} from '../model/context.model.js';
+import {isFail} from '../model/result-types.js';
+import {nodeRepo} from '../repository/node-repo.js';
+import {getSettingsState} from '../state/settings.state.js';
 import {getState} from '../state/state.js';
 import {
 	getGradientWord,
@@ -13,38 +21,43 @@ import {
 	ticketAssigneesFromBreadCrumb,
 	ticketTagsFromBreadCrumb,
 } from '../utils/ticket.utils.js';
-import {getCmdModifiers} from './command-modifiers.js';
-import {isFail} from '../model/result-types.js';
+import {CmdKeyword, CmdKeywords} from './cmd-keywords.js';
 import {CmdValidity, cmdValidity} from './cmd-validity.js';
-import {CmdKeyword} from './cmd-keywords.js';
-import {CmdKeywords} from './cmd-keywords.js';
+import {
+	AUTOSYNC_DEBOUNCE_HINTS,
+	ConfigModifiers,
+	EditModifiers,
+	getCmdModifiers,
+} from './command-modifiers.js';
 import {isDateWithinPeekHorizon, parsePeekDateInput} from './validate-date.js';
 
 const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE'];
 
 const guardEditableNodes = (): ValidationResult => {
 	const target = getState().selectedNode;
-	if (!target?.context)
+	if (!target?.context) {
 		return invalid({
 			message: 'Missing target context',
 		});
+	}
 
-	if (!EDITABLE_NODES.includes(target?.context)) {
+	if (!EDITABLE_NODES.includes(target.context)) {
 		return invalid({
 			message: 'Command not available in this context',
 		});
 	}
+
 	return valid();
 };
 
 export const CONFIRM_MSG = '<ENTER> to confirm';
 
-// Types
 type ValidationResult = {
 	validity: CmdValidity;
 	message?: string;
 	completionWordList: string[];
 };
+
 type Validator = ({
 	modifier,
 	command,
@@ -55,7 +68,6 @@ type Validator = ({
 	inputString: string;
 }) => ValidationResult;
 
-// Helpers
 const valid = (
 	message: string = '',
 	completionWordList: string[] = [],
@@ -78,7 +90,6 @@ const invalid = ({
 });
 
 const isBlank = (value: string) => value.length === 0;
-
 const buildHint = ({
 	prefix = '',
 	wordList,
@@ -94,23 +105,30 @@ const buildHint = ({
 	inputString: string;
 	minLengthForHints?: number;
 }) => {
+	const trimmedInput = inputString.trim();
+
+	if (trimmedInput.length < minLengthForHints) {
+		return '';
+	}
+
 	const filteredList = wordList
 		.filter(Boolean)
-		.filter(x => x.startsWith(inputString.trim()));
+		.filter(x => x.startsWith(trimmedInput));
 
 	const sortedByGradient = [...filteredList].sort(
 		(a, b) => getWordGradientPosition(a) - getWordGradientPosition(b),
 	);
 
-	const hintOptions = sortedByGradient.slice(0, noOfHints).map(getGradientWord);
+	const hintOptions = sortedByGradient.slice(0, noOfHints);
 
-	const optionsStr =
-		hintOptions.length > minLengthForHints ? hintOptions.join(' ') : '';
-	return optionsStr ? `${prefix}${optionsStr}${postfix}` : '';
+	const coloredOptions = hintOptions.map(getGradientWord).join(' ');
+
+	return coloredOptions ? `${prefix}${coloredOptions}${postfix}` : '';
 };
 
 const requireExact = ({modifier}: {modifier: string}) => {
 	const expected = 'confirm';
+
 	return modifier === expected
 		? valid(CONFIRM_MSG)
 		: invalid({
@@ -121,14 +139,15 @@ const requireExact = ({modifier}: {modifier: string}) => {
 		  });
 };
 
-const requireOneIn =
-	({list, hint}: {list: readonly string[]; hint: string}): Validator =>
-	({modifier}) =>
-		list.includes(modifier)
-			? valid(CONFIRM_MSG)
-			: invalid({
-					message: isBlank(modifier) ? hint : '',
-			  });
+// const requireOneIn =
+// 	({list, hint}: {list: readonly string[]; hint: string}): Validator =>
+// 	({modifier}) =>
+// 		list.includes(modifier)
+// 			? valid(CONFIRM_MSG)
+// 			: invalid({
+// 					message: isBlank(modifier) ? hint : '',
+// 					completionWordList: [...list],
+// 			  });
 
 const requireOneWithValueIn =
 	({
@@ -144,6 +163,7 @@ const requireOneWithValueIn =
 		if (!list.includes(modifier)) {
 			return invalid({
 				message: isBlank(modifier) ? hint : '',
+				completionWordList: [...list],
 			});
 		}
 
@@ -163,10 +183,182 @@ const requireModifierOrInputStr =
 			? invalid({message: hint, completionWordList: []})
 			: valid(CONFIRM_MSG);
 
+const validateConfigCommand: Validator = ({modifier, inputString}) => {
+	const configModifiers = getCmdModifiers(CmdKeywords.CONFIG);
+
+	if (!configModifiers.includes(modifier)) {
+		return invalid({
+			message: buildHint({
+				prefix: 'config... ',
+				wordList: configModifiers,
+				inputString: modifier,
+				minLengthForHints: 0,
+			}),
+			completionWordList: configModifiers,
+		});
+	}
+
+	switch (modifier) {
+		case ConfigModifiers.EDITOR: {
+			const wordList = [...editorConfig];
+
+			if (!inputString.trim()) {
+				return invalid({
+					message: buildHint({
+						prefix: 'editor... ',
+						wordList,
+						inputString,
+						minLengthForHints: 0,
+					}),
+					completionWordList: wordList,
+				});
+			}
+
+			if (!wordList.includes(inputString.trim())) {
+				return invalid({
+					message: buildHint({
+						prefix: 'known editors... ',
+						wordList,
+						inputString,
+						minLengthForHints: 0,
+					}),
+					completionWordList: wordList,
+				});
+			}
+
+			return valid(CONFIRM_MSG);
+		}
+
+		case ConfigModifiers.VIEW: {
+			const wordList = ['dense', 'wide'];
+
+			if (!wordList.includes(inputString.trim())) {
+				return invalid({
+					message: buildHint({
+						prefix: 'view... ',
+						wordList,
+						inputString,
+						minLengthForHints: 0,
+					}),
+					completionWordList: wordList,
+				});
+			}
+
+			return valid(CONFIRM_MSG);
+		}
+
+		case ConfigModifiers.USERNAME: {
+			if (!inputString.trim()) {
+				return invalid({
+					message: `Enter a username. Saved in ${chalk.bgBlack(
+						'~/.epiq-global/config.json',
+					)}`,
+				});
+			}
+
+			return valid(CONFIRM_MSG);
+		}
+
+		case ConfigModifiers.AUTOSYNC: {
+			const wordList = ['yes', 'no'] satisfies YesNo[];
+			const currentAutoSyncStatus = getSettingsState().autoSync;
+
+			if (!wordList.includes(inputString.trim() as YesNo)) {
+				return invalid({
+					message: buildHint({
+						prefix: `should auto-sync (recommended), currently: ${booleanToYesNo(
+							currentAutoSyncStatus,
+						)} `,
+						wordList,
+						noOfHints: 3,
+						inputString,
+						minLengthForHints: 0,
+					}),
+					completionWordList: wordList,
+				});
+			}
+
+			return valid(CONFIRM_MSG);
+		}
+
+		case ConfigModifiers.SYNC_DEBOUNCE_MS: {
+			const currentDuration = getSettingsState().autoSyncIntervalMs;
+			const duration = parseAutoSyncDebounceMs(inputString);
+
+			if (
+				!inputString.trim() ||
+				duration === null ||
+				duration < MIN_AUTOSYNC_DURATION_MS
+			) {
+				const hint = buildHint({
+					prefix: ' examples: ',
+					wordList: AUTOSYNC_DEBOUNCE_HINTS,
+					minLengthForHints: 0,
+					inputString,
+				});
+
+				return invalid({
+					message:
+						`provide duration above ${MIN_AUTOSYNC_DURATION_MS}ms. ` +
+						`current duration: ${currentDuration}ms.` +
+						hint,
+					completionWordList: AUTOSYNC_DEBOUNCE_HINTS,
+				});
+			}
+
+			return valid(CONFIRM_MSG);
+		}
+
+		default:
+			return invalid({
+				message: 'Unknown config option',
+				completionWordList: configModifiers,
+			});
+	}
+};
+
+const validateEditCommand: Validator = ({modifier}) => {
+	const editModifiers = getCmdModifiers(CmdKeywords.EDIT);
+
+	if (!editModifiers.includes(modifier)) {
+		const message = buildHint({
+			prefix: 'edit... ',
+			wordList: editModifiers,
+			inputString: modifier,
+			minLengthForHints: 0,
+		});
+
+		return invalid({
+			message: message || 'Unknown edit option',
+			completionWordList: editModifiers,
+		});
+	}
+
+	const editableNodeTypeValidation = guardEditableNodes();
+	if (editableNodeTypeValidation.validity === 'invalid') {
+		return editableNodeTypeValidation;
+	}
+
+	switch (modifier) {
+		case EditModifiers.TITLE:
+			return valid(CONFIRM_MSG);
+
+		case EditModifiers.DESCRIPTION:
+			return valid('<ENTER> to edit in ' + getSettingsState().preferredEditor);
+
+		default:
+			return invalid({
+				message: `Unknown edit option`,
+				completionWordList: editModifiers,
+			});
+	}
+};
+
 const validators: Record<CmdKeyword, Validator> = {
 	[CmdKeywords.EXPORT]: () => {
 		return valid(CONFIRM_MSG + ', and create export markdown file');
 	},
+
 	[CmdKeywords.PEEK]: args => {
 		const modifier = args.modifier;
 		if (modifier === 'now') return valid(CONFIRM_MSG);
@@ -190,6 +382,7 @@ const validators: Record<CmdKeyword, Validator> = {
 				message: 'Command is not applicable in this context',
 			});
 		}
+
 		const boardCreationDate = safeDateFromUlid(boardResult.value.id);
 
 		if (isFail(boardCreationDate)) {
@@ -216,16 +409,17 @@ const validators: Record<CmdKeyword, Validator> = {
 
 		return valid(CONFIRM_MSG);
 	},
+
 	[CmdKeywords.EXIT]: () => valid(CONFIRM_MSG + ' and exit the application'),
 	[CmdKeywords.INIT]: () => valid(CONFIRM_MSG),
+
 	[CmdKeywords.FILTER]: args => {
 		if (args.modifier === 'clear') return valid();
 
 		const isValidModifier = (val: string): val is Filter['target'] =>
 			getCmdModifiers(CmdKeywords.FILTER).includes(val);
 
-		const modifier = args.modifier;
-		if (!modifier || !isValidModifier(args.modifier ?? '')) {
+		if (!args.modifier || !isValidModifier(args.modifier)) {
 			return invalid({
 				message: buildHint({
 					wordList: getCmdModifiers(CmdKeywords.FILTER),
@@ -259,7 +453,7 @@ const validators: Record<CmdKeyword, Validator> = {
 			});
 		}
 
-		if (wordList.length && !wordList.includes(args.inputString.trim() ?? '')) {
+		if (wordList.length && !wordList.includes(args.inputString.trim())) {
 			return invalid({
 				message: buildHint({
 					prefix: `existing ${args.modifier}s... `,
@@ -275,39 +469,17 @@ const validators: Record<CmdKeyword, Validator> = {
 	},
 
 	[CmdKeywords.NONE]: args => {
-		let wordList = getCmdModifiers(CmdKeywords.NONE);
-		// Special logic for colon separated commands.
-		// We don't want to show all the variants for those.
-		// Initially we just autocomplete with the base, and then autocomplete with the variants
-		const matchColonSeparatedCommand = /^[A-Za-z_]+:/g;
-		const inputWordSplitOnColon = args.inputString.match(
-			matchColonSeparatedCommand,
-		);
-		if (inputWordSplitOnColon && inputWordSplitOnColon.length) {
-			wordList = [
-				...wordList.filter(x => x.trim().match(matchColonSeparatedCommand)),
-			];
-		} else {
-			wordList = [
-				...new Set(
-					wordList.flatMap(
-						word =>
-							word
-								.match(matchColonSeparatedCommand)
-								?.join('')
-								.replace(':', '') ?? word,
-					),
-				),
-			];
-		}
+		const wordList = getCmdModifiers(CmdKeywords.NONE);
+
 		return !args.command
 			? invalid({
 					message: buildHint({
 						prefix: '... ',
-						wordList: wordList,
+						wordList,
 						inputString: args.inputString,
 						minLengthForHints: 0,
 					}),
+					completionWordList: wordList,
 			  })
 			: valid();
 	},
@@ -324,27 +496,29 @@ const validators: Record<CmdKeyword, Validator> = {
 			onValue: 'provide a name...',
 		})(args),
 
-	[CmdKeywords.SET_DESCRIPTION]: () => valid(CONFIRM_MSG),
 	[CmdKeywords.HELP]: () => valid(CONFIRM_MSG),
-	[CmdKeywords.RENAME]: () => {
-		const editableNodeTypeValidation = guardEditableNodes();
-		if (editableNodeTypeValidation.validity === 'invalid')
-			return editableNodeTypeValidation;
-		return valid(CONFIRM_MSG);
-	},
+
+	[CmdKeywords.EDIT]: validateEditCommand,
+
+	[CmdKeywords.CONFIG]: validateConfigCommand,
+
 	[CmdKeywords.DELETE]: args => {
 		const editableNodeTypeValidation = guardEditableNodes();
-		if (editableNodeTypeValidation.validity === 'invalid')
+		if (editableNodeTypeValidation.validity === 'invalid') {
 			return editableNodeTypeValidation;
+		}
+
 		return requireExact(args);
 	},
+
 	[CmdKeywords.CLOSE_ISSUE]: args => requireExact(args),
 	[CmdKeywords.RE_OPEN_ISSUE]: args => requireExact(args),
 
 	[CmdKeywords.MOVE]: args => {
 		const editableNodeTypeValidation = guardEditableNodes();
-		if (editableNodeTypeValidation.validity === 'invalid')
+		if (editableNodeTypeValidation.validity === 'invalid') {
 			return editableNodeTypeValidation;
+		}
 
 		return requireModifierOrInputStr({
 			hint: buildHint({
@@ -362,10 +536,15 @@ const validators: Record<CmdKeyword, Validator> = {
 			.map(tag => ` ${chalk.bgHex(getStringColor(tag))(' ' + tag + ' ')} `)
 			.slice(0, 10);
 
+		const existingTags = tags.join('');
+
 		return requireModifierOrInputStr({
-			hint: 'tag name like... ' + tags.join(''),
+			hint: existingTags.length
+				? 'existing tags ... ' + existingTags
+				: 'create tag ...',
 		})(args);
 	},
+
 	[CmdKeywords.UNTAG]: args => {
 		const tagsRes = ticketTagsFromBreadCrumb();
 		if (isFail(tagsRes)) {
@@ -377,8 +556,9 @@ const validators: Record<CmdKeyword, Validator> = {
 			.map(tag => ` ${chalk.bgHex(getStringColor(tag))(' ' + tag + ' ')} `)
 			.slice(0, 10);
 
-		if (!tags.length)
-			return invalid({message: 'Issue has not tags', completionWordList: []});
+		if (!tags.length) {
+			return invalid({message: 'Issue has no tags', completionWordList: []});
+		}
 
 		return requireModifierOrInputStr({
 			hint: ' ... ' + tags.join(''),
@@ -400,7 +580,7 @@ const validators: Record<CmdKeyword, Validator> = {
 	},
 
 	[CmdKeywords.UNASSIGN]: args => {
-		const assigneesRes = ticketAssigneesFromBreadCrumb(); // ← you'll need this helper
+		const assigneesRes = ticketAssigneesFromBreadCrumb();
 		if (isFail(assigneesRes)) {
 			return invalid({
 				message: 'Invalid unassign target',
@@ -428,42 +608,6 @@ const validators: Record<CmdKeyword, Validator> = {
 		})(args);
 	},
 
-	// Settings
-	[CmdKeywords.SET_EDITOR]: args => {
-		logger.debug(
-			`Validating command: ${args.command} ${args.modifier} ${args.inputString}`,
-		);
-		const wordList = getCmdModifiers(CmdKeywords.SET_EDITOR);
-
-		return !args.modifier
-			? invalid({
-					message: buildHint({
-						wordList,
-						inputString: args.inputString,
-					}),
-			  })
-			: valid(CONFIRM_MSG);
-	},
-
-	[CmdKeywords.SET_USERNAME]: args => {
-		return !args.inputString
-			? invalid({
-					message: `Enter a username. Saved in ${chalk.bgBlack(
-						'~/.epiq-global/',
-					)}`,
-			  })
-			: valid();
-	},
-
-	[CmdKeywords.SET_VIEW]: args =>
-		requireOneIn({
-			list: getCmdModifiers(CmdKeywords.SET_VIEW),
-			hint: buildHint({
-				wordList: getCmdModifiers(CmdKeywords.SET_VIEW),
-				noOfHints: 3,
-				inputString: args.inputString,
-			}),
-		})(args),
 	[CmdKeywords.SYNC]: () => valid(CONFIRM_MSG),
 };
 

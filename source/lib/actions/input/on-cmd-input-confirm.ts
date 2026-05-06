@@ -1,19 +1,21 @@
+import {queueAutoSync} from '../../../git/auto-sync.js';
+import {cmdValidity} from '../../command-line/cmd-validity.js';
 import {getCommandIntent} from '../../command-line/command-intent.js';
 import {CommandIntent} from '../../command-line/command-meta.js';
+import {commands} from '../../command-line/commands.js';
 import {
-	resultStatuses,
 	failed,
 	isFail,
 	Result,
+	resultStatuses,
 } from '../../model/result-types.js';
-import {cmdValidity} from '../../command-line/cmd-validity.js';
-import {commands} from '../../command-line/commands.js';
 import {
 	cmdResultToValidationState,
 	commandConfirmed,
 	commandPending,
 	getCmdState,
 } from '../../state/cmd.state.js';
+import {getSettingsState} from '../../state/settings.state.js';
 import {getState} from '../../state/state.js';
 
 const READ_ONLY_COMMAND_INTENTS = new Set<CommandIntent>([
@@ -39,7 +41,9 @@ export const onConfirmCommandLineSequenceInput = async ({
 
 	commandPending();
 
-	if (getState().readOnly && !READ_ONLY_COMMAND_INTENTS.has(intent)) {
+	const {readOnly} = getState();
+
+	if (readOnly && !READ_ONLY_COMMAND_INTENTS.has(intent)) {
 		return cmdResultToValidationState({
 			status: resultStatuses.Fail,
 			message: 'Command not available in readonly state',
@@ -59,11 +63,21 @@ export const onConfirmCommandLineSequenceInput = async ({
 		});
 	}
 
-	const commandResult = await actionMeta.action(actionMeta, {
-		command,
-		inputString,
-		modifier,
-	});
+	let commandResult: Result;
+
+	try {
+		commandResult = await actionMeta.action(actionMeta, {
+			command,
+			inputString,
+			modifier,
+		});
+	} catch (error) {
+		return cmdResultToValidationState({
+			status: resultStatuses.Fail,
+			message: error instanceof Error ? error.message : 'Command failed',
+			value: null,
+		});
+	}
 
 	if (isFail(commandResult)) {
 		return cmdResultToValidationState(commandResult);
@@ -72,5 +86,9 @@ export const onConfirmCommandLineSequenceInput = async ({
 	commandConfirmed({addToHistory: !isForceExecutedBySystem});
 	actionMeta.onSuccess?.();
 
-	return cmdResultToValidationState(commandResult);
+	if (getSettingsState().autoSync) {
+		queueAutoSync();
+	}
+
+	return commandResult;
 };

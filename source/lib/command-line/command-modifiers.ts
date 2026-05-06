@@ -1,21 +1,56 @@
-import {editorConfig} from '../editor/editor-config.js';
-import {nodeRepo} from '../repository/node-repo.js';
+import {MIN_AUTOSYNC_DURATION_MS} from '../../git/auto-sync.js';
 import {
 	getUserSetupStatus,
 	isRepositoryInitialized,
 } from '../config/setup-utils.js';
 import {AnyContext, NavNodeCtx} from '../model/context.model.js';
+import {nodeRepo} from '../repository/node-repo.js';
 import {getState} from '../state/state.js';
 import {TAGS_DEFAULT} from '../static/default-tags.js';
 import {
 	ticketAssigneesFromBreadCrumb,
 	ticketTagsFromBreadCrumb,
 } from '../utils/ticket.utils.js';
-import {CmdKeyword} from './cmd-keywords.js';
-import {CmdKeywords} from './cmd-keywords.js';
+import {CmdKeyword, CmdKeywords} from './cmd-keywords.js';
 import {generatePeekOffsetHints} from './validate-date.js';
 
 const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE'];
+
+export const ConfigModifiers = {
+	EDITOR: 'editor',
+	VIEW: 'view',
+	USERNAME: 'userName',
+	AUTOSYNC: 'autoSync',
+	SYNC_DEBOUNCE_MS: 'syncDebounceMs',
+} as const;
+
+export type ConfigModifier =
+	(typeof ConfigModifiers)[keyof typeof ConfigModifiers];
+
+export const EditModifiers = {
+	TITLE: 'title',
+	DESCRIPTION: 'description',
+} as const;
+
+export type EditModifier = (typeof EditModifiers)[keyof typeof EditModifiers];
+
+export const CONFIG_MODIFIERS = [
+	ConfigModifiers.EDITOR,
+	ConfigModifiers.VIEW,
+	ConfigModifiers.USERNAME,
+	ConfigModifiers.AUTOSYNC,
+	ConfigModifiers.SYNC_DEBOUNCE_MS,
+];
+
+export const EDIT_MODIFIERS = [EditModifiers.TITLE, EditModifiers.DESCRIPTION];
+
+export const AUTOSYNC_DEBOUNCE_HINTS = [
+	String(MIN_AUTOSYNC_DURATION_MS),
+	'5000',
+	'15000',
+	'30000',
+	'60000',
+];
 
 export type CommandMap = {
 	[K in keyof typeof NavNodeCtx]: (typeof CmdKeywords)[keyof typeof CmdKeywords][];
@@ -25,14 +60,12 @@ const GLOBAL_COMMANDS = [
 	CmdKeywords.SYNC,
 	CmdKeywords.HELP,
 	CmdKeywords.EXPORT,
-	CmdKeywords.SET_VIEW,
-	CmdKeywords.SET_EDITOR,
-	CmdKeywords.SET_USERNAME,
+	CmdKeywords.CONFIG,
 ];
 
 const EDIT_COMMANDS = [
 	CmdKeywords.NEW,
-	CmdKeywords.RENAME,
+	CmdKeywords.EDIT,
 	CmdKeywords.DELETE,
 	CmdKeywords.MOVE,
 ];
@@ -44,7 +77,7 @@ const TICKET_COMMANDS = [
 	CmdKeywords.UNASSIGN,
 	CmdKeywords.CLOSE_ISSUE,
 	CmdKeywords.RE_OPEN_ISSUE,
-	CmdKeywords.SET_DESCRIPTION,
+	CmdKeywords.EDIT,
 ];
 
 const PRESENTATION_COMMANDS = [CmdKeywords.FILTER, CmdKeywords.PEEK];
@@ -52,12 +85,7 @@ const PRESENTATION_COMMANDS = [CmdKeywords.FILTER, CmdKeywords.PEEK];
 const COMMANDS_BY_CONTEXT: CommandMap = {
 	WORKSPACE: [...GLOBAL_COMMANDS, ...EDIT_COMMANDS],
 	BOARD: [...PRESENTATION_COMMANDS, ...GLOBAL_COMMANDS, ...EDIT_COMMANDS],
-	SWIMLANE: [
-		...PRESENTATION_COMMANDS,
-		...GLOBAL_COMMANDS,
-		...EDIT_COMMANDS,
-		...TICKET_COMMANDS,
-	],
+	SWIMLANE: [...PRESENTATION_COMMANDS, ...GLOBAL_COMMANDS, ...EDIT_COMMANDS],
 	TICKET: [...GLOBAL_COMMANDS, ...EDIT_COMMANDS, ...TICKET_COMMANDS],
 	FIELD: [...GLOBAL_COMMANDS, ...TICKET_COMMANDS],
 	FIELD_LIST: [...GLOBAL_COMMANDS, ...TICKET_COMMANDS],
@@ -71,11 +99,11 @@ const getNewModifiers = (context: AnyContext): string[] => {
 };
 
 const getAvailableBaseCommands = (): CmdKeyword[] => {
-	const {currentNode, selectedNode, readOnly} = getState();
+	const {selectedNode, readOnly, breadCrumb} = getState();
 
-	const isSetupComplete = getUserSetupStatus().isSetup;
-	if (!isSetupComplete) {
-		return [CmdKeywords.HELP, CmdKeywords.SET_EDITOR, CmdKeywords.SET_USERNAME];
+	const {isSetupDone} = getUserSetupStatus();
+	if (!isSetupDone) {
+		return [CmdKeywords.HELP, CmdKeywords.CONFIG];
 	}
 
 	if (!isRepositoryInitialized()) {
@@ -87,21 +115,28 @@ const getAvailableBaseCommands = (): CmdKeyword[] => {
 			CmdKeywords.HELP,
 			CmdKeywords.PEEK,
 			CmdKeywords.EXPORT,
-			CmdKeywords.SET_VIEW,
+			CmdKeywords.CONFIG,
 		];
 	}
 
-	const currentContext = currentNode.context ?? 'WORKSPACE';
 	const selectedContext = selectedNode?.context;
 	const selectedIsEditable =
 		selectedContext && EDITABLE_NODES.includes(selectedContext);
 
-	return COMMANDS_BY_CONTEXT[currentContext].filter(command => {
-		if (
-			command === CmdKeywords.RENAME ||
-			command === CmdKeywords.DELETE ||
-			command === CmdKeywords.MOVE
-		) {
+	const commandsInBreadcrumbContext = [
+		...new Set(
+			[...breadCrumb, selectedNode]
+				.map(c => c?.context)
+				.flatMap(c => (c ? COMMANDS_BY_CONTEXT[c] : [])),
+		),
+	];
+
+	return commandsInBreadcrumbContext.filter(command => {
+		if (command === CmdKeywords.MOVE) {
+			return false;
+		}
+
+		if (command === CmdKeywords.EDIT || command === CmdKeywords.DELETE) {
 			return selectedIsEditable;
 		}
 
@@ -124,8 +159,8 @@ export const getCmdModifiers = (keyword: CmdKeyword): string[] => {
 
 		[CmdKeywords.PEEK]: [...generatePeekOffsetHints(), 'now', 'prev', 'next'],
 
-		[CmdKeywords.SET_USERNAME]: [],
-		[CmdKeywords.SET_DESCRIPTION]: ['confirm'],
+		[CmdKeywords.EDIT]: [...EDIT_MODIFIERS],
+
 		[CmdKeywords.DELETE]: ['confirm'],
 		[CmdKeywords.RE_OPEN_ISSUE]: ['confirm'],
 		[CmdKeywords.CLOSE_ISSUE]: ['confirm'],
@@ -141,8 +176,6 @@ export const getCmdModifiers = (keyword: CmdKeyword): string[] => {
 		],
 
 		[CmdKeywords.FILTER]: ['tag', 'assignee', 'description', 'title', 'clear'],
-		[CmdKeywords.SET_VIEW]: ['dense', 'wide'],
-		[CmdKeywords.SET_EDITOR]: [...editorConfig],
 
 		[CmdKeywords.TAG]: [
 			...new Set([...Object.keys(TAGS_DEFAULT), ...nodeRepo.getExistingTags()]),
@@ -158,8 +191,9 @@ export const getCmdModifiers = (keyword: CmdKeyword): string[] => {
 
 		[CmdKeywords.ASSIGN]: nodeRepo.getExistingAssignees(),
 
-		[CmdKeywords.RENAME]: [],
 		[CmdKeywords.NEW]: getNewModifiers(currentContext),
+
+		[CmdKeywords.CONFIG]: [...CONFIG_MODIFIERS],
 	};
 
 	return modifiers[keyword] ?? [];

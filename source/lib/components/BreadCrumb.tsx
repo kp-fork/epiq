@@ -7,6 +7,7 @@ import {theme} from '../theme/themes.js';
 import {AssigneeUI} from './Assignee.js';
 import {TagUI} from './Tag.js';
 import {isSuccess} from '../model/result-types.js';
+import {getSettingsState} from '../state/settings.state.js';
 
 type Props = {
 	width: number;
@@ -19,7 +20,8 @@ const truncate = (str: string, max: number) => {
 };
 
 export const Breadcrumb: React.FC<Props> = ({width}) => {
-	const {breadCrumb: crumbs, currentNode, selectedIndex, viewMode} = getState();
+	const {viewMode} = getSettingsState();
+	const {breadCrumb: crumbs, currentNode, selectedIndex} = getState();
 
 	const selectedTarget = getOrderedChildren(currentNode.id)[selectedIndex];
 	const ticketResult = findAncestor(

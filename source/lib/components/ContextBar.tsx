@@ -2,7 +2,6 @@ import {Box} from 'ink';
 import React from 'react';
 import {Mode, ModeUnion} from '../model/action-map.model.js';
 import {AppState} from '../model/app-state.model.js';
-import {useAppState} from '../state/state.js';
 import {CommandLine} from './CommandLine.js';
 import {ContextBarInfo} from './ContextBarInfo.js';
 
@@ -13,7 +12,6 @@ interface Props {
 }
 
 export const ContextBar: React.FC<Props> = ({width, mode, availableHints}) => {
-	const state = useAppState();
 	const clampedHints: string[] = [];
 	let usedWidth = 0;
 
@@ -29,7 +27,7 @@ export const ContextBar: React.FC<Props> = ({width, mode, availableHints}) => {
 
 	return (
 		<Box>
-			{mode === Mode.COMMAND_LINE && state.syncStatus.status !== 'syncing' ? (
+			{mode === Mode.COMMAND_LINE ? (
 				<CommandLine width={width} />
 			) : (
 				<ContextBarInfo

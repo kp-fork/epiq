@@ -13,15 +13,12 @@ export const CmdKeywords = {
 	ASSIGN: 'assign',
 	UNASSIGN: 'unassign',
 	DELETE: 'delete',
-	RENAME: 'rename',
 
 	CLOSE_ISSUE: 'close',
 	RE_OPEN_ISSUE: 'reopen',
-	SET_DESCRIPTION: 'edit',
 
-	SET_EDITOR: 'config:editor',
-	SET_VIEW: 'config:view',
-	SET_USERNAME: 'config:username',
+	CONFIG: 'config',
+	EDIT: 'edit',
 
 	// Git
 	SYNC: 'sync',
