@@ -19,6 +19,7 @@ const EpiqConfigSchema = z.object({
 	userId: z.string().optional(),
 	autoSync: z.boolean().nullable().optional(),
 	autoSyncDebounceMs: z.number().optional(),
+	viewMode: z.enum(['dense', 'wide']).optional(),
 });
 
 export type EpiqConfig = z.infer<typeof EpiqConfigSchema>;
@@ -165,5 +166,6 @@ export const loadSettingsFromConfig = (): Result<SettingsState> => {
 		userId,
 		autoSync: autoSync ?? false,
 		autoSyncIntervalMs: autoSyncIntervalMs ?? 15_000,
+		viewMode: 'dense',
 	});
 };

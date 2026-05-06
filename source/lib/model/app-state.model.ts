@@ -56,7 +56,6 @@ export type AppState = {
 	rootNodeId: string;
 	nodes: Record<string, NavNode<AnyContext>>;
 	renderedChildrenIndex: Record<string, NavNode<AnyContext>[]>; // parent -> children mapping
-	viewMode: ViewMode;
 	syncStatus: SyncStatus;
 
 	// Time tracking

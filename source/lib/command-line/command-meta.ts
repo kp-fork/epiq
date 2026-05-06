@@ -22,11 +22,7 @@ export const CmdIntent = {
 	Peek: 'peek',
 
 	// Settings
-	SetView: 'set-view',
-	SetEditor: 'set-editor',
-	SetUserName: 'set-user-name',
-	SetAutoSync: 'set-auto-sync',
-	SetAutoSyncDebounceMs: 'set-auto-sync-duration-ms',
+	Config: 'config',
 
 	// Add
 	NewItem: 'add-new-item',

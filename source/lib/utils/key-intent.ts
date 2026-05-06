@@ -3,6 +3,7 @@ import {Mode, ModeUnion} from '../model/action-map.model.js';
 import {getCommandLineIntent} from './get-command-line-intent.js';
 import {getState} from '../state/state.js';
 import {getCmdState} from '../state/cmd.state.js';
+import {getSettingsState} from '../state/settings.state.js';
 
 export const Intent = {
 	// Git
@@ -184,7 +185,7 @@ export function getKeyIntent(
 		case 'space':
 			return Intent.Confirm;
 		case 'v':
-			return getState().viewMode === 'wide'
+			return getSettingsState().viewMode === 'wide'
 				? Intent.SetViewDense
 				: Intent.SetViewWide;
 		case 'q':

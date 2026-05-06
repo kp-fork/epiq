@@ -11,6 +11,7 @@ import {
 	getExportsDirPath,
 	resolveClosestEpiqRoot,
 } from '../lib/storage/paths.js';
+import {getSettingsState} from '../lib/state/settings.state.js';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -75,11 +76,12 @@ const stripAnsi = (value: string): string =>
 	value.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
 
 export const exportBoardLayout = async (): Promise<Result<string>> => {
+	const {viewMode} = getSettingsState();
 	const {
 		currentNode,
 		selectedIndex,
 		breadCrumb,
-		viewMode,
+
 		mode,
 		renderedChildrenIndex,
 	} = getState();
@@ -103,7 +105,7 @@ export const exportBoardLayout = async (): Promise<Result<string>> => {
 			currentNode={currentNode}
 			selectedIndex={selectedIndex}
 			breadCrumb={breadCrumb}
-			viewMode={viewMode}
+			viewMode={viewMode ?? 'dense'}
 			mode={mode}
 		/>,
 		{width, height},

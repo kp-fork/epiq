@@ -1,3 +1,5 @@
+import {ViewMode} from '../model/app-state.model.js';
+
 export type User = {
 	userId: string;
 	userName: string;
@@ -9,6 +11,7 @@ export type SettingsState = {
 	preferredEditor: string | null;
 	userName: string | null;
 	userId: string | null;
+	viewMode: ViewMode | null;
 };
 
 let settingsState: SettingsState = {
@@ -17,6 +20,7 @@ let settingsState: SettingsState = {
 	preferredEditor: null,
 	userName: null,
 	userId: null,
+	viewMode: null,
 };
 
 export const getSettingsState = (): SettingsState => settingsState;

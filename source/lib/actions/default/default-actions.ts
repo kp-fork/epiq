@@ -4,6 +4,7 @@ import {succeeded} from '../../model/result-types.js';
 import {FieldNames} from '../../repository/fielNames.js';
 import {getOrderedChildren} from '../../repository/rank.js';
 import {setCmdInput} from '../../state/cmd.state.js';
+import {patchSettingsState} from '../../state/settings.state.js';
 import {getState, patchState} from '../../state/state.js';
 import {Intent} from '../../utils/key-intent.js';
 import {onConfirmCommandLineSequenceInput} from '../input/on-cmd-input-confirm.js';
@@ -50,7 +51,7 @@ export const DefaultActions: ActionEntry[] = [
 
 			if (!children?.length) {
 				if (selectedNode?.title === FieldNames.DESCRIPTION) {
-					setCmdInput(() => CmdKeywords.EDIT_DESCRIPTION + ' ');
+					setCmdInput(() => CmdKeywords.EDIT + 'description ');
 					patchState({mode: Mode.COMMAND_LINE});
 					return succeeded('Propose command', true);
 				} else if (selectedNode?.title === FieldNames.ASSIGNEES) {
@@ -65,7 +66,7 @@ export const DefaultActions: ActionEntry[] = [
 					currentNode.title === FieldNames.DESCRIPTION &&
 					selectedNode?.context === 'TEXT'
 				) {
-					setCmdInput(() => CmdKeywords.EDIT_DESCRIPTION + ' ');
+					setCmdInput(() => CmdKeywords.EDIT + 'description ');
 					patchState({mode: Mode.COMMAND_LINE});
 					return succeeded('Propose command', true);
 				}
@@ -132,7 +133,7 @@ export const DefaultActions: ActionEntry[] = [
 		mode: Mode.DEFAULT,
 		description: '[v] view change (wide/dense)',
 		action: () => {
-			patchState({
+			patchSettingsState({
 				viewMode: 'dense',
 			});
 			return succeeded('View set', null);
@@ -142,7 +143,7 @@ export const DefaultActions: ActionEntry[] = [
 		intent: Intent.SetViewWide,
 		mode: Mode.DEFAULT,
 		action: () => {
-			patchState({
+			patchSettingsState({
 				viewMode: 'wide',
 			});
 			return succeeded('View set', null);

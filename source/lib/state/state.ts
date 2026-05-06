@@ -129,7 +129,6 @@ export function initWorkspaceState(workspace: Workspace) {
 		filters: [],
 		tags: {},
 		contributors: {},
-		viewMode: 'dense',
 		mode: Mode.DEFAULT,
 		nodes: {[workspace.id]: workspace},
 		rootNodeId: workspace.id,

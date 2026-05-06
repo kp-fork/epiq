@@ -55,23 +55,23 @@ export default function SettingsUI({width, height}: Props) {
 		{
 			key: 'username',
 			done: isSetUserName,
-			command: ':config:username',
+			command: ':config username',
 			value: userName,
 			message: 'First, choose your username.',
 		},
 		{
 			key: 'editor',
 			done: isSetPreferredEditor,
-			command: ':config:editor',
+			command: ':config editor',
 			value: preferredEditor,
 			message: 'Nice. Now pick your editor.',
 		},
 		{
 			key: 'autosync',
 			done: isSetAutoSync,
-			command: ':config:autosync',
+			command: ':config autosync',
 			value: autoSync,
-			message: 'Almost there. Enable auto sync.',
+			message: 'Almost there. Configure auto sync.',
 		},
 	];
 

@@ -2,9 +2,7 @@ import {MIN_AUTOSYNC_DURATION_MS} from '../../git/auto-sync.js';
 import {
 	getUserSetupStatus,
 	isRepositoryInitialized,
-	YesNo,
 } from '../config/setup-utils.js';
-import {editorConfig} from '../editor/editor-config.js';
 import {AnyContext, NavNodeCtx} from '../model/context.model.js';
 import {nodeRepo} from '../repository/node-repo.js';
 import {getState} from '../state/state.js';
@@ -18,6 +16,42 @@ import {generatePeekOffsetHints} from './validate-date.js';
 
 const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE'];
 
+export const ConfigModifiers = {
+	EDITOR: 'editor',
+	VIEW: 'view',
+	USERNAME: 'userName',
+	AUTOSYNC: 'autoSync',
+	SYNC_DEBOUNCE_MS: 'syncDebounceMs',
+} as const;
+
+export type ConfigModifier =
+	(typeof ConfigModifiers)[keyof typeof ConfigModifiers];
+
+export const EditModifiers = {
+	TITLE: 'title',
+	DESCRIPTION: 'description',
+} as const;
+
+export type EditModifier = (typeof EditModifiers)[keyof typeof EditModifiers];
+
+export const CONFIG_MODIFIERS = [
+	ConfigModifiers.EDITOR,
+	ConfigModifiers.VIEW,
+	ConfigModifiers.USERNAME,
+	ConfigModifiers.AUTOSYNC,
+	ConfigModifiers.SYNC_DEBOUNCE_MS,
+];
+
+export const EDIT_MODIFIERS = [EditModifiers.TITLE, EditModifiers.DESCRIPTION];
+
+export const AUTOSYNC_DEBOUNCE_HINTS = [
+	String(MIN_AUTOSYNC_DURATION_MS),
+	'5000',
+	'15000',
+	'30000',
+	'60000',
+];
+
 export type CommandMap = {
 	[K in keyof typeof NavNodeCtx]: (typeof CmdKeywords)[keyof typeof CmdKeywords][];
 };
@@ -26,16 +60,12 @@ const GLOBAL_COMMANDS = [
 	CmdKeywords.SYNC,
 	CmdKeywords.HELP,
 	CmdKeywords.EXPORT,
-	CmdKeywords.SET_VIEW,
-	CmdKeywords.SET_EDITOR,
-	CmdKeywords.SET_USERNAME,
-	CmdKeywords.SET_AUTOSYNC,
-	CmdKeywords.SET_AUTOSYNC_DEBOUNCE_MS,
+	CmdKeywords.CONFIG,
 ];
 
 const EDIT_COMMANDS = [
 	CmdKeywords.NEW,
-	CmdKeywords.EDIT_TITLE,
+	CmdKeywords.EDIT,
 	CmdKeywords.DELETE,
 	CmdKeywords.MOVE,
 ];
@@ -47,7 +77,7 @@ const TICKET_COMMANDS = [
 	CmdKeywords.UNASSIGN,
 	CmdKeywords.CLOSE_ISSUE,
 	CmdKeywords.RE_OPEN_ISSUE,
-	CmdKeywords.EDIT_DESCRIPTION,
+	CmdKeywords.EDIT,
 ];
 
 const PRESENTATION_COMMANDS = [CmdKeywords.FILTER, CmdKeywords.PEEK];
@@ -73,12 +103,7 @@ const getAvailableBaseCommands = (): CmdKeyword[] => {
 
 	const {isSetupDone} = getUserSetupStatus();
 	if (!isSetupDone) {
-		return [
-			CmdKeywords.HELP,
-			CmdKeywords.SET_EDITOR,
-			CmdKeywords.SET_USERNAME,
-			CmdKeywords.SET_AUTOSYNC,
-		];
+		return [CmdKeywords.HELP, CmdKeywords.CONFIG];
 	}
 
 	if (!isRepositoryInitialized()) {
@@ -90,7 +115,7 @@ const getAvailableBaseCommands = (): CmdKeyword[] => {
 			CmdKeywords.HELP,
 			CmdKeywords.PEEK,
 			CmdKeywords.EXPORT,
-			CmdKeywords.SET_VIEW,
+			CmdKeywords.CONFIG,
 		];
 	}
 
@@ -111,7 +136,7 @@ const getAvailableBaseCommands = (): CmdKeyword[] => {
 			return false;
 		}
 
-		if (command === CmdKeywords.EDIT_TITLE || command === CmdKeywords.DELETE) {
+		if (command === CmdKeywords.EDIT || command === CmdKeywords.DELETE) {
 			return selectedIsEditable;
 		}
 
@@ -134,8 +159,8 @@ export const getCmdModifiers = (keyword: CmdKeyword): string[] => {
 
 		[CmdKeywords.PEEK]: [...generatePeekOffsetHints(), 'now', 'prev', 'next'],
 
-		[CmdKeywords.EDIT_TITLE]: [],
-		[CmdKeywords.EDIT_DESCRIPTION]: ['confirm'],
+		[CmdKeywords.EDIT]: [...EDIT_MODIFIERS],
+
 		[CmdKeywords.DELETE]: ['confirm'],
 		[CmdKeywords.RE_OPEN_ISSUE]: ['confirm'],
 		[CmdKeywords.CLOSE_ISSUE]: ['confirm'],
@@ -149,26 +174,26 @@ export const getCmdModifiers = (keyword: CmdKeyword): string[] => {
 			'to-previous',
 			'cancel',
 		],
+
 		[CmdKeywords.FILTER]: ['tag', 'assignee', 'description', 'title', 'clear'],
+
 		[CmdKeywords.TAG]: [
 			...new Set([...Object.keys(TAGS_DEFAULT), ...nodeRepo.getExistingTags()]),
 		],
+
 		[CmdKeywords.UNTAG]: [
 			...(ticketTagsFromBreadCrumb()?.value?.map(({name}) => name) ?? []),
 		],
+
 		[CmdKeywords.UNASSIGN]: [
 			...(ticketAssigneesFromBreadCrumb()?.value?.map(({name}) => name) ?? []),
 		],
+
 		[CmdKeywords.ASSIGN]: nodeRepo.getExistingAssignees(),
 
 		[CmdKeywords.NEW]: getNewModifiers(currentContext),
 
-		// Settings
-		[CmdKeywords.SET_VIEW]: ['dense', 'wide'],
-		[CmdKeywords.SET_EDITOR]: [...editorConfig],
-		[CmdKeywords.SET_USERNAME]: [],
-		[CmdKeywords.SET_AUTOSYNC]: ['yes', 'no'] satisfies YesNo[],
-		[CmdKeywords.SET_AUTOSYNC_DEBOUNCE_MS]: [],
+		[CmdKeywords.CONFIG]: [...CONFIG_MODIFIERS],
 	};
 
 	return modifiers[keyword] ?? [];

@@ -11,6 +11,7 @@ import {InitProjectUI} from './InitProjectUI.js';
 import SettingsUI from './SettingsUI.js';
 import {Topbar} from './Topbar.js';
 import {WorkspaceUI} from './WorkspaceUI.js';
+import {getSettingsState} from '../state/settings.state.js';
 
 type EpiqAppProps = {
 	height: number;
@@ -93,7 +94,7 @@ export default function EpiqApp({width, height}: EpiqAppProps) {
 					currentNode={state.currentNode}
 					selectedIndex={state.selectedIndex}
 					breadCrumb={state.breadCrumb}
-					viewMode={state.viewMode}
+					viewMode={getSettingsState().viewMode ?? 'dense'}
 					mode={state.mode}
 				/>
 			</Box>

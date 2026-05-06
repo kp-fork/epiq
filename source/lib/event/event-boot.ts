@@ -230,7 +230,9 @@ export function bootStateFromEventLog({
 
 	const failures = results.filter(isFail);
 	if (failures.length > 0) {
-		return failed(failures.map(x => x.message).join('\n'));
+		return failed(
+			`Materializing failed:\n${failures.map(x => x.message).join('\n')}`,
+		);
 	}
 
 	navigateToInitialNode();
