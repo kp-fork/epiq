@@ -471,17 +471,15 @@ const validators: Record<CmdKeyword, Validator> = {
 	[CmdKeywords.NONE]: args => {
 		const wordList = getCmdModifiers(CmdKeywords.NONE);
 
-		return !args.command
-			? invalid({
-					message: buildHint({
-						prefix: '... ',
-						wordList,
-						inputString: args.inputString,
-						minLengthForHints: 0,
-					}),
-					completionWordList: wordList,
-			  })
-			: valid();
+		return invalid({
+			message: buildHint({
+				prefix: '... ',
+				wordList,
+				inputString: args.inputString,
+				minLengthForHints: 0,
+			}),
+			completionWordList: wordList,
+		});
 	},
 
 	[CmdKeywords.NEW]: args =>
