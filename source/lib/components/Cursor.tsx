@@ -13,6 +13,7 @@ const cursors = {
 	default: ['❯ '],
 	move: ['◆ ', '◆ '],
 	'command-line': ['❯ '],
+	palette: ['❯ '],
 } as const;
 
 export const CursorUI: React.FC<Props> = ({isSelected, placeholder = '  '}) => {

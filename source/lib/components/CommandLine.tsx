@@ -1,9 +1,10 @@
 import chalk from 'chalk';
 import {Box, Text} from 'ink';
 import React, {useEffect, useMemo, useState} from 'react';
-import {AutoCompletion} from '../command-line/command-auto-complete.js';
-import {CmdValidity} from '../command-line/cmd-validity.js';
 import {CmdKeyword} from '../command-line/cmd-keywords.js';
+import {CmdValidity} from '../command-line/cmd-validity.js';
+import {AutoCompletion} from '../command-line/command-auto-complete.js';
+import {Mode, ModeUnion} from '../model/action-map.model.js';
 import {
 	commandLineState,
 	subscribeCommandLineState,
@@ -133,7 +134,10 @@ const isEqual = (a: CommandLineViewState, b: CommandLineViewState): boolean =>
 	a.modifier === b.modifier &&
 	a.inputString === b.inputString;
 
-export const CommandLine: React.FC<{width: number}> = ({width}) => {
+export const CommandLine: React.FC<{width: number; mode: ModeUnion}> = ({
+	width,
+	mode,
+}) => {
 	const [state, setState] = useState<CommandLineViewState>(
 		getCommandLineViewState(),
 	);
@@ -220,7 +224,12 @@ export const CommandLine: React.FC<{width: number}> = ({width}) => {
 			renderedAfter = GRAY(autoCompletion.remainder.slice(1) + afterCursor);
 		}
 
-		return GRAY(':') + renderedBefore + renderedCursor + renderedAfter;
+		return (
+			GRAY(mode === Mode.PALETTE ? '?' : ':') +
+			renderedBefore +
+			renderedCursor +
+			renderedAfter
+		);
 	}, [value, cursorPosition, autoCompletion, command, modifier]);
 	return (
 		<Box flexDirection="column" justifyContent="flex-start">

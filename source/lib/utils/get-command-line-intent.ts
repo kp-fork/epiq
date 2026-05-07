@@ -46,3 +46,38 @@ export const getCommandLineIntent = (key: readline.Key, sequence: string) => {
 			return Intent.CaptureInput;
 	}
 };
+
+export const getPaletteInputIntent = (key: readline.Key, sequence: string) => {
+	if (isMoveWordLeft(key, key.sequence!)) {
+		return Intent.MoveCursorLeftOfWord;
+	}
+
+	if (isMoveWordRight(key, key.sequence!)) {
+		return Intent.MoveCursorRightOfWord;
+	}
+
+	if (isEraseWord(key, key.sequence!)) {
+		return Intent.EraseInputWord;
+	}
+
+	switch (key.name) {
+		case 'tab':
+			return Intent.AutoCompleteCommand;
+		case 'up':
+			return Intent.NavPreviousItem;
+		case 'down':
+			return Intent.NavNextItem;
+		case 'left':
+			return Intent.MoveCursorLeft;
+		case 'right':
+			return Intent.MoveCursorRight;
+		case 'return':
+			return Intent.Confirm;
+		case 'backspace':
+			return sequence ? Intent.EraseInput : Intent.ExitCommandLine;
+		case 'escape':
+			return Intent.ExitCommandLine;
+		default:
+			return Intent.CaptureInput;
+	}
+};

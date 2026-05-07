@@ -1,4 +1,6 @@
 export const CmdKeywords = {
+	PALETTE: '?',
+
 	EXIT: 'exit',
 	INIT: 'init',
 	HELP: 'help',

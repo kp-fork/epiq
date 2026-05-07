@@ -22,6 +22,7 @@ const READ_ONLY_ACTION_INTENTS = new Set<IntentInferred>([
 	Intent.Confirm,
 	Intent.Exit,
 	Intent.InitCommandLine,
+	Intent.InitCommandPalette,
 	Intent.ExitCommandLine,
 	Intent.CaptureInput,
 	Intent.EraseInput,

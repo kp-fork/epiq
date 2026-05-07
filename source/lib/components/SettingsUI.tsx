@@ -93,10 +93,10 @@ export default function SettingsUI({width, height}: Props) {
 				Welcome! 🔹
 			</Text>
 
-			<Text>Lets get you started - its a breeze.</Text>
+			<Text>Let's get you started - it's a breeze.</Text>
 			<Text color={theme.secondary2}>
-				And remember, you can always get help with{' '}
-				<Text color={theme.accent}>:help</Text>.
+				Remember - you can always search available commands by typing:
+				<Text color={theme.accent}> ? </Text>
 			</Text>
 
 			{activeStep && <Text color={theme.secondary2}>{activeStep.message}</Text>}
