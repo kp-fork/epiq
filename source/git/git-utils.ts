@@ -178,42 +178,47 @@ export const commitAndGetSha = async ({
 		shaResult.value.stdout.trim(),
 	);
 };
+
 export const getInProgressGitOperation = async (
 	repoRoot: string,
 ): Promise<Result<string | null>> => {
-	const gitDirResult = await getGitDir(repoRoot);
-	if (isFail(gitDirResult)) return failed(gitDirResult.message);
+	const statusResult = await execGit({
+		cwd: repoRoot,
+		args: ['status', '--porcelain=v1', '--branch'],
+	});
 
-	const gitDir = gitDirResult.value;
+	if (isFail(statusResult)) return failed(statusResult.message);
 
-	const markers = [
-		'MERGE_HEAD',
-		'CHERRY_PICK_HEAD',
-		'REVERT_HEAD',
-		'REBASE_HEAD',
-		'rebase-merge',
-		'rebase-apply',
+	const status = statusResult.value.stdout;
+
+	const statusOperationMarkers = [
+		'rebase in progress',
+		'merge in progress',
+		'cherry-pick in progress',
+		'revert in progress',
+		'bisect in progress',
 	];
 
-	const activeMarker = markers.find(marker =>
-		fs.existsSync(path.join(gitDir, marker)),
+	const statusMarker = statusOperationMarkers.find(marker =>
+		status.toLowerCase().includes(marker),
 	);
 
-	return succeeded(
-		'Checked for in-progress Git operation',
-		activeMarker ?? null,
-	);
+	if (statusMarker) {
+		return succeeded('Checked for in-progress Git operation', statusMarker);
+	}
+
+	return succeeded('Checked for in-progress Git operation', null);
 };
 
 export const hasInProgressGitOperation = async (
 	repoRoot: string,
 ): Promise<Result<boolean>> => {
-	const result = await getInProgressGitOperation(repoRoot);
-	if (isFail(result)) return result;
+	const operationResult = await getInProgressGitOperation(repoRoot);
+	if (isFail(operationResult)) return failed(operationResult.message);
 
 	return succeeded(
 		'Checked for in-progress Git operation',
-		result.value !== null,
+		operationResult.value !== null,
 	);
 };
 
