@@ -46,7 +46,8 @@
 		"release": "pnpm pack:check && pnpm publish:tarball",
 		"start:mcp": "IS_LOCAL=true tsx source/mcp/server.ts",
 		"inspect:mcp": "pnpm dlx @modelcontextprotocol/inspector",
-		"lint": "eslint ."
+		"lint": "eslint .",
+		"lint:err": "eslint . --quiet"
 	},
 	"files": [
 		"dist"

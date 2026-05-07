@@ -198,7 +198,7 @@ function normalizeIntent(
 	dir: 'up' | 'down' | 'left' | 'right',
 	mode: ModeUnion,
 ) {
-	let dirMap =
+	const dirMap =
 		mode === Mode.MOVE
 			? {
 					prevItem: Intent.MovePreviousItem,

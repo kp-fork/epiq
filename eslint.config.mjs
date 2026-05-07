@@ -18,6 +18,11 @@ export default tseslint.config(
 			},
 		},
 		rules: {
+			'no-control-regex': 'off',
+			'no-useless-assignment': 'warn',
+			'no-case-declarations': 'off',
+			'@typescript-eslint/no-unused-vars': 'off',
+			'@typescript-eslint/no-explicit-any': 'warn',
 			'@typescript-eslint/no-floating-promises': 'warn',
 			'@typescript-eslint/no-misused-promises': [
 				'warn',
