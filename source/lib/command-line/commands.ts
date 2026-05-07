@@ -43,7 +43,7 @@ import {
 	resolveClosestEpiqRoot,
 } from '../storage/paths.js';
 import {CmdKeywords} from './cmd-keywords.js';
-import {CmdIntent} from './command-meta.js';
+import {CmdIntent} from './command-intent.js';
 import {
 	ConfigModifiers,
 	EditModifiers,
@@ -68,11 +68,13 @@ export const commands: CommandLineActionEntry[] = [
 	{
 		systemOnly: true,
 		intent: CmdIntent.Move,
+		description: 'Internal move-state command',
 		mode: Mode.COMMAND_LINE,
 		action: moveCommand,
 	},
 	{
 		intent: CmdIntent.Delete,
+		description: 'Delete the currently selected node',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			const userRes = resolveActorId();
@@ -95,6 +97,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Filter,
+		description: 'Filter the board, for example `:filter tag urgent`',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			const {modifier, inputString} = getCmdState().commandMeta;
@@ -105,8 +108,9 @@ export const commands: CommandLineActionEntry[] = [
 					.map(x => x.split(regex)[0])
 					.includes(val);
 
-			if (!filterTarget || !isValidModifier(filterTarget))
+			if (!filterTarget || !isValidModifier(filterTarget)) {
 				return failed('Invalid filter modifier');
+			}
 
 			const filter: Filter = {
 				target: filterTarget,
@@ -120,11 +124,12 @@ export const commands: CommandLineActionEntry[] = [
 				mode: Mode.DEFAULT,
 			}));
 
-			return succeeded('Viewing help', null);
+			return succeeded('Filter updated', null);
 		},
 	},
 	{
 		intent: CmdIntent.ViewHelp,
+		description: 'Open the help screen',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			patchState({mode: Mode.HELP});
@@ -133,6 +138,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.CloseIssue,
+		description: 'Move the selected issue to the closed swimlane',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			const userRes = resolveActorId();
@@ -154,9 +160,7 @@ export const commands: CommandLineActionEntry[] = [
 			const rankResult = resolveAndPersistRankForMove(
 				closeSwimlane.id,
 				target.id,
-				{
-					at: 'end',
-				},
+				{at: 'end'},
 				userRes.value,
 			);
 			if (isFail(rankResult)) return rankResult;
@@ -180,6 +184,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.ReopenIssue,
+		description: 'Move a closed issue back to its previous swimlane',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			const userRes = resolveActorId();
@@ -207,6 +212,7 @@ export const commands: CommandLineActionEntry[] = [
 			if (ticket.parentNodeId !== closeSwimlane.id) {
 				return failed('Issue is not closed');
 			}
+
 			if (!isTicketNode(ticket)) return failed('Target node is not issue');
 
 			const previousParentId = resolveReopenParentFromLog(ticket);
@@ -224,9 +230,7 @@ export const commands: CommandLineActionEntry[] = [
 			const rankResult = resolveAndPersistRankForMove(
 				previousParent.id,
 				ticket.id,
-				{
-					at: 'end',
-				},
+				{at: 'end'},
 				userRes.value,
 			);
 			if (isFail(rankResult)) return rankResult;
@@ -250,11 +254,13 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Init,
+		description: 'Initialize Epiq in the current git repository',
 		mode: Mode.COMMAND_LINE,
 		action: initCommand,
 	},
 	{
 		intent: CmdIntent.NewItem,
+		description: 'Create a new board, swimlane, or issue',
 		mode: Mode.COMMAND_LINE,
 		action: (_cmdAction, cmdState) => {
 			const userRes = resolveActorId();
@@ -322,8 +328,9 @@ export const commands: CommandLineActionEntry[] = [
 
 			if (cmdState.modifier === 'swimlane') {
 				const boardResult = findInBreadCrumb(breadCrumb, 'BOARD');
-				if (isFail(boardResult))
+				if (isFail(boardResult)) {
 					return failed('Unable to add swimlane in this context');
+				}
 
 				const rankResult = resolveAndPersistRankForCreate(
 					boardResult.value.id,
@@ -376,7 +383,6 @@ export const commands: CommandLineActionEntry[] = [
 				if (isFail(issueEventsResult)) return issueEventsResult;
 
 				const issueEvents = issueEventsResult.value;
-
 				const issueResults = materializeAndPersistAll(issueEvents);
 
 				if (issueResults.some(x => isFail(x))) {
@@ -391,8 +397,9 @@ export const commands: CommandLineActionEntry[] = [
 				}
 
 				const issueResult = issueResults[0];
-				if (!issueResult || isFail(issueResult))
+				if (!issueResult || isFail(issueResult)) {
 					return failed('Issue creation failed');
+				}
 
 				const issueEvent = issueEvents.find(
 					(event): event is AppEvent<'add.issue'> =>
@@ -411,12 +418,14 @@ export const commands: CommandLineActionEntry[] = [
 
 				return succeeded('Issue created', null);
 			}
+
 			return succeeded('Success', null);
 		},
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
 	{
 		intent: CmdIntent.Rename,
+		description: 'itle] Rename the currently selected node',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			const userRes = resolveActorId();
@@ -441,6 +450,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.UntagTicket,
+		description: 'Remove a tag from the selected issue',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			const userRes = resolveActorId();
@@ -457,8 +467,9 @@ export const commands: CommandLineActionEntry[] = [
 			if (!selectedNode) return failed('Invalid untag target');
 
 			const ticketResult = findAncestor(selectedNode.id, 'TICKET');
-			if (isFail(ticketResult))
+			if (isFail(ticketResult)) {
 				return failed('Unable to untag issue in this context');
+			}
 
 			const ticket = ticketResult.value;
 
@@ -486,6 +497,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.TagTicket,
+		description: 'Add or create a tag on the selected issue',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			const userRes = resolveActorId();
@@ -500,8 +512,9 @@ export const commands: CommandLineActionEntry[] = [
 			if (!selected) return failed('Invalid tag target');
 
 			const ticketResult = findAncestor(selected.id, 'TICKET');
-			if (isFail(ticketResult))
+			if (isFail(ticketResult)) {
 				return failed('Unable to tag issue in this context');
+			}
 
 			const ticket = ticketResult.value;
 			const existingTag = findTagByName(name);
@@ -558,6 +571,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.AssignUserToTicket,
+		description: 'Assign a user to the selected issue',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			const userRes = resolveActorId();
@@ -572,8 +586,9 @@ export const commands: CommandLineActionEntry[] = [
 			if (!selected) return failed('Invalid assign target');
 
 			const ticketResult = findAncestor(selected.id, 'TICKET');
-			if (isFail(ticketResult))
+			if (isFail(ticketResult)) {
 				return failed('Unable to assign issue in this context');
+			}
 
 			const ticket = ticketResult.value;
 			const existingContributor = findContributorByName(name);
@@ -630,6 +645,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.UnassignUserFromTicket,
+		description: 'Remove an assignee from the selected issue',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			const userRes = resolveActorId();
@@ -640,15 +656,17 @@ export const commands: CommandLineActionEntry[] = [
 			if (!name) return failed('Provide an assignee to remove');
 
 			const existingContributor = findContributorByName(name);
-			if (!existingContributor)
+			if (!existingContributor) {
 				return failed(`Assignee "${name}" does not exist`);
+			}
 
 			const {selectedNode} = getState();
 			if (!selectedNode) return failed('Invalid unassign target');
 
 			const ticketResult = findAncestor(selectedNode.id, 'TICKET');
-			if (isFail(ticketResult))
+			if (isFail(ticketResult)) {
 				return failed('Unable to unassign in this context');
+			}
 
 			const ticket = ticketResult.value;
 
@@ -676,10 +694,12 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Sync,
+		description: 'Pull, merge, commit, and push Epiq state',
 		mode: Mode.COMMAND_LINE,
 		action: async () => {
-			if (getState().syncStatus.status === 'syncing')
+			if (getState().syncStatus.status === 'syncing') {
 				return failed('Sync already in progress');
+			}
 
 			const navigationAnchor = captureNavigationAnchor();
 
@@ -745,7 +765,6 @@ export const commands: CommandLineActionEntry[] = [
 				mode: Mode.DEFAULT,
 			});
 
-			// Restore navigation
 			const restoreResult = restoreNavigationAnchor(navigationAnchor);
 			if (isFail(restoreResult)) return restoreResult;
 
@@ -754,6 +773,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Peek,
+		description: 'View board state at another point in time',
 		mode: Mode.COMMAND_LINE,
 		action: async () => {
 			const boardNodeResult = findInBreadCrumb(getState().breadCrumb, 'BOARD');
@@ -763,8 +783,8 @@ export const commands: CommandLineActionEntry[] = [
 			if (isFail(epiqRootDirResult)) throw new Error(epiqRootDirResult.message);
 
 			const eventsResult = loadMergedEvents(epiqRootDirResult.value);
-
 			if (isFail(eventsResult)) return failed(eventsResult.message);
+
 			const allEvents = eventsResult.value;
 
 			const {modifier} = getCmdState().commandMeta;
@@ -836,15 +856,15 @@ export const commands: CommandLineActionEntry[] = [
 				mode: Mode.DEFAULT,
 				readOnly: true,
 				timeMode: 'peek',
-				unappliedEvents: unappliedEvents,
+				unappliedEvents,
 			});
 
-			return succeeded(`Peeking `, true);
+			return succeeded('Peeking ', true);
 		},
 	},
-
 	{
 		intent: CmdIntent.Export,
+		description: 'Export the current board layout to markdown',
 		mode: Mode.COMMAND_LINE,
 		action: async () => {
 			const exportResult = await exportBoardLayout();
@@ -859,6 +879,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Exit,
+		description: 'Exit the application',
 		mode: Mode.COMMAND_LINE,
 		action: async () => {
 			navigationUtils.exit();
@@ -867,6 +888,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Edit,
+		description: 'Edit title or description',
 		mode: Mode.COMMAND_LINE,
 		action: (_, cmdState) => {
 			if (cmdState.modifier === EditModifiers.DESCRIPTION) {
@@ -899,6 +921,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Config,
+		description: 'Update editor, username, view, autosync, or sync debounce',
 		mode: Mode.COMMAND_LINE,
 		action: (_, cmdState) => {
 			const value = cmdState.inputString.trim();

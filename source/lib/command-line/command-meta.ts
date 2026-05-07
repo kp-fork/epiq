@@ -6,39 +6,9 @@ import {CmdKeyword} from './cmd-keywords.js';
 import {CmdKeywords} from './cmd-keywords.js';
 import {cmdValidation} from './command-validation.js';
 import {DEFAULT_WORDS} from './default-word-list.js';
-
-export const CmdIntent = {
-	// Fundamentals (tight coupling to scope)
-	Exit: 'exit',
-	Init: 'init',
-	None: 'none',
-	ViewHelp: 'view-help',
-	Rename: 'rename',
-	Edit: 'edit',
-	Delete: 'delete',
-
-	Filter: 'filter',
-	Move: 'move',
-	Peek: 'peek',
-
-	// Settings
-	Config: 'config',
-
-	// Add
-	NewItem: 'add-new-item',
-
-	TagTicket: 'ticket-tag',
-	UntagTicket: 'ticket-untag',
-	AssignUserToTicket: 'ticket-assign-user',
-	UnassignUserFromTicket: 'ticket-unassign-user',
-	CloseIssue: 'close-issue',
-	ReopenIssue: 're-open-issue',
-
-	// Git
-	Sync: 'sync',
-
-	Export: 'export',
-} as const;
+import {CmdIntent} from './command-intent.js';
+import {getState} from '../state/state.js';
+import {Mode} from '../model/action-map.model.js';
 
 export type CommandIntent = (typeof CmdIntent)[keyof typeof CmdIntent];
 
@@ -54,23 +24,28 @@ export const getCmdMeta = (
 ): CurrentCmdMeta => {
 	const command = parsed.command ?? '';
 	const {modifier, target, inputString} = parsed;
-	const {message, validity, completionWordList} = cmdValidation[
-		command
-	].validate(command, modifier, inputString);
+	const {
+		message,
+		validity,
+		completionWordList: contextualWordList,
+	} = cmdValidation[command].validate(command, modifier, inputString);
 
-	const wordList =
+	const staticWordList =
 		target === 'command' || target === 'modifier'
 			? getCmdModifiers(command)
 			: DEFAULT_WORDS;
 
+	const {mode} = getState();
+	const hintMessage = mode === Mode.COMMAND_LINE ? message ?? '' : '';
+	const autoCompletionWordList = [...contextualWordList, ...staticWordList];
 	return {
 		validity,
 		command: parsed.command,
 		modifier: parsed.modifier,
 		inputString: parsed.inputString,
-		infoMessage: message ?? '',
+		infoMessage: hintMessage,
 		autoCompletion: isCursorAtEndOfLine
-			? getAutoCompletion(parsed, [...completionWordList, ...wordList])
+			? getAutoCompletion(parsed, autoCompletionWordList)
 			: {hint: '', hints: [], remainder: '', overlap: 0},
 	};
 };

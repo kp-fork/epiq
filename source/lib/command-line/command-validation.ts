@@ -189,7 +189,7 @@ const validateConfigCommand: Validator = ({modifier, inputString}) => {
 	if (!configModifiers.includes(modifier)) {
 		return invalid({
 			message: buildHint({
-				prefix: 'config... ',
+				prefix: '... ',
 				wordList: configModifiers,
 				inputString: modifier,
 				minLengthForHints: 0,
@@ -205,7 +205,7 @@ const validateConfigCommand: Validator = ({modifier, inputString}) => {
 			if (!inputString.trim()) {
 				return invalid({
 					message: buildHint({
-						prefix: 'editor... ',
+						prefix: 'editors: ',
 						wordList,
 						inputString,
 						minLengthForHints: 0,
@@ -217,7 +217,7 @@ const validateConfigCommand: Validator = ({modifier, inputString}) => {
 			if (!wordList.includes(inputString.trim())) {
 				return invalid({
 					message: buildHint({
-						prefix: 'known editors... ',
+						prefix: 'editors: ',
 						wordList,
 						inputString,
 						minLengthForHints: 0,
@@ -250,7 +250,7 @@ const validateConfigCommand: Validator = ({modifier, inputString}) => {
 		case ConfigModifiers.USERNAME: {
 			if (!inputString.trim()) {
 				return invalid({
-					message: `Enter a username. Saved in ${chalk.bgBlack(
+					message: `Enter a user name. Saved in ${chalk.bgBlack(
 						'~/.epiq-global/config.json',
 					)}`,
 				});
@@ -412,6 +412,7 @@ const validators: Record<CmdKeyword, Validator> = {
 
 	[CmdKeywords.EXIT]: () => valid(CONFIRM_MSG + ' and exit the application'),
 	[CmdKeywords.INIT]: () => valid(CONFIRM_MSG),
+	[CmdKeywords.PALETTE]: () => valid(CONFIRM_MSG),
 
 	[CmdKeywords.FILTER]: args => {
 		if (args.modifier === 'clear') return valid();

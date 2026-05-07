@@ -1,5 +1,5 @@
 import {getState} from '../state/state.js';
-import {CmdIntent, CommandIntent} from './command-meta.js';
+import {CommandIntent} from './command-meta.js';
 import {CmdKeywords} from './cmd-keywords.js';
 
 export const getCommandIntent = (command: string): CommandIntent => {
@@ -67,3 +67,35 @@ export const getCommandIntent = (command: string): CommandIntent => {
 			return CmdIntent.None;
 	}
 };
+export const CmdIntent = {
+	// Fundamentals (tight coupling to scope)
+	Exit: 'exit',
+	Init: 'init',
+	None: 'none',
+	ViewHelp: 'view-help',
+	Rename: 'rename',
+	Edit: 'edit',
+	Delete: 'delete',
+
+	Filter: 'filter',
+	Move: 'move',
+	Peek: 'peek',
+
+	// Settings
+	Config: 'config',
+
+	// Add
+	NewItem: 'add-new-item',
+
+	TagTicket: 'ticket-tag',
+	UntagTicket: 'ticket-untag',
+	AssignUserToTicket: 'ticket-assign-user',
+	UnassignUserFromTicket: 'ticket-unassign-user',
+	CloseIssue: 'close-issue',
+	ReopenIssue: 're-open-issue',
+
+	// Git
+	Sync: 'sync',
+
+	Export: 'export',
+} as const;

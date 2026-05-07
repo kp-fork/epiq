@@ -48,9 +48,10 @@ export const InitProjectUI: React.FC<InitProjectUIProps> = ({
 			</Box>
 
 			<Box marginTop={1}>
-				<Text color={theme.secondary2}>
-					(This will create the local epiq project files)
-				</Text>
+				<Text color={theme.secondary2}>This will create, commit and push </Text>
+				<Text color={theme.primary} backgroundColor={theme.secondary}>
+					{' .epiq/project.json '}
+				</Text>{' '}
 			</Box>
 		</Box>
 	);
