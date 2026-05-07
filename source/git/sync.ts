@@ -13,7 +13,7 @@ import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
 import {patchState} from '../lib/state/state.js';
 import {failSync, setSynced, setSyncing} from '../lib/state/sync-state.js';
 import {resolveClosestEpiqProjectRoot} from '../lib/storage/paths.js';
-import {getStateBranch} from './git-constants.js';
+import {getStateBranch, ORIGIN} from './git-constants.js';
 import {
 	ensureStateBranchLayout,
 	getEventFilePath,
@@ -22,6 +22,7 @@ import {
 } from './git-storage.js';
 import {
 	execGit,
+	execGitAllowFail,
 	hasInProgressGitOperation,
 	hasStateBranchChanges,
 	isDetachedHead,
@@ -64,11 +65,32 @@ export const syncEpiqFromRemote = async (
 
 	logger.info('[sync] pulling state branch', stateBranch);
 
-	const pullResult = await pullBranchRebaseIfPresent({
+	const fetchResult = await execGit({
 		cwd: stateBranchRoot,
-		branch: stateBranch,
+		args: ['fetch', ORIGIN, stateBranch],
 	});
-	if (isFail(pullResult)) return failSync(pullResult.message);
+	if (isFail(fetchResult)) {
+		return failSync(`Failed to fetch state branch\n${fetchResult.message}`);
+	}
+
+	const abortRebaseResult = await execGitAllowFail({
+		cwd: stateBranchRoot,
+		args: ['rebase', '--abort'],
+	});
+
+	logger.info('[sync] abort stale state rebase result', {
+		exitCode: abortRebaseResult.exitCode,
+	});
+
+	const resetResult = await execGit({
+		cwd: stateBranchRoot,
+		args: ['reset', '--hard', `${ORIGIN}/${stateBranch}`],
+	});
+	if (isFail(resetResult)) {
+		return failSync(
+			`Failed to reset state branch from remote\n${resetResult.message}`,
+		);
+	}
 
 	const hydrateResult = hydrateEventsFromStateBranch({
 		repoRoot,

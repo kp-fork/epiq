@@ -78,22 +78,22 @@ const renderApp = (): Result<void> => {
 	return renderNode(<EpiqApp width={width} height={height} />);
 };
 
-const loadBootContext = (): BootContext => {
+const loadBootContext = (): Result<BootContext> => {
 	const epiqRootDirResult = resolveClosestEpiqProjectRoot(process.cwd());
 
 	if (isFail(epiqRootDirResult)) {
-		return {
+		return succeeded('No Epiq project found', {
 			hasProject: false,
 			epiqRootDir: null,
 			events: [],
-		};
+		});
 	}
 
-	return {
+	return succeeded('Resolved Epiq project root', {
 		hasProject: true,
 		epiqRootDir: epiqRootDirResult.value,
 		events: [],
-	};
+	});
 };
 
 const loadSettings = (): Result<boolean> => {
@@ -119,7 +119,7 @@ const syncAndLoadProjectEvents = async (
 		return failed('Project root missing from boot context');
 	}
 
-	const syncResult = await syncEpiqFromRemote();
+	const syncResult = await syncEpiqFromRemote(bootContext.epiqRootDir);
 
 	if (isFail(syncResult)) {
 		return failed(syncResult.message);
@@ -131,28 +131,32 @@ const syncAndLoadProjectEvents = async (
 		return failed(eventsResult.message);
 	}
 
+	logger.info('[boot] loaded events', {
+		root: bootContext.epiqRootDir,
+		count: eventsResult.value.length,
+		actions: eventsResult.value.map(event => event.action),
+	});
+
 	return succeeded('Loaded project events', eventsResult.value);
 };
 
 async function bootApp(): Promise<Result<void>> {
 	try {
-		// 1. Load global user settings if available.
-		// Missing ~/.epiq-global/config.json must not prevent an existing project
-		// from reconstructing its state branch and hydrating local events.
 		const settingsResult = loadSettings();
 		if (isFail(settingsResult)) return failAt(1, settingsResult.message);
 
-		// 2. Resolve whether current directory belongs to an initialized project.
-		const bootContext = loadBootContext();
+		const bootContextResult = loadBootContext();
+		if (isFail(bootContextResult)) {
+			return failAt(2, bootContextResult.message);
+		}
 
-		// 3. If project exists, rebuild/sync read-only state storage first.
-		// This is the important recovery path for nuked ~/.epiq-global.
+		const bootContext = bootContextResult.value;
+
 		const eventsResult = await syncAndLoadProjectEvents(bootContext);
 		if (isFail(eventsResult)) return failAt(3, eventsResult.message);
 
 		bootContext.events = eventsResult.value;
 
-		// 4. Materialize runtime state from event log, or placeholder if no project.
 		const bootStateResult = bootStateFromEventLog({
 			hasProject: bootContext.hasProject,
 			eventLog: bootContext.events,
@@ -162,17 +166,14 @@ async function bootApp(): Promise<Result<void>> {
 			return failAt(4, bootStateResult.message);
 		}
 
-		// 5. Patch final boot metadata only after state exists.
 		const stateResult = getSafeState();
 		if (isFail(stateResult)) return failAt(5, stateResult.message);
 
 		patchState({hasProject: bootContext.hasProject});
 
-		// 6. Render only after getSafeState confirms initialized state.
 		const renderResult = renderApp();
 		if (isFail(renderResult)) return failAt(6, renderResult.message);
 
-		// 7. Initialize listeners after first successful render.
 		initListeners();
 
 		return succeeded('Booted Epiq', undefined);
