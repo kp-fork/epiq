@@ -30,7 +30,7 @@ export type BaseState = Omit<AppState, DerivedKeys>;
 // -----------------------------
 // Internal store
 // -----------------------------
-let _appState: AppState;
+let _appState: AppState | undefined;
 let _initialWorkspace: Workspace | undefined;
 
 const listeners = new Set<() => void>();
@@ -103,11 +103,9 @@ function derive(state: BaseState): Result<AppState> {
 // -----------------------------
 export const getState = () => {
 	if (!_appState) {
-		logger.error(
-			'State not initialized. Call initWorkspaceState() first.',
-			new Error().stack,
-		);
+		throw new Error('State not initialized. Call initWorkspaceState() first.');
 	}
+
 	return _appState;
 };
 
@@ -229,3 +227,5 @@ export const resetState = (): Result<string> => {
 
 	return initWorkspaceState(_initialWorkspace);
 };
+
+export const isStateInitialized = () => _appState !== undefined;
