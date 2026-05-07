@@ -45,7 +45,8 @@
 		"publish:tarball": "FILE=$(ls -t epiq-*.tgz | head -n 1) && echo \"Publishing $FILE\" && npm publish \"$FILE\"",
 		"release": "pnpm pack:check && pnpm publish:tarball",
 		"start:mcp": "IS_LOCAL=true tsx source/mcp/server.ts",
-		"inspect:mcp": "pnpm dlx @modelcontextprotocol/inspector"
+		"inspect:mcp": "pnpm dlx @modelcontextprotocol/inspector",
+		"lint": "eslint ."
 	},
 	"files": [
 		"dist"
@@ -60,29 +61,26 @@
 		"zod": "^4.3.6"
 	},
 	"devDependencies": {
+		"@eslint/js": "^10.0.1",
 		"@sindresorhus/tsconfig": "^3.0.1",
 		"@types/marked-terminal": "^6.1.1",
 		"@types/node": "^25.5.0",
 		"@types/react": "^18.0.32",
+		"@typescript-eslint/eslint-plugin": "^8.59.2",
+		"@typescript-eslint/parser": "^8.59.2",
 		"@vdemedes/prettier-config": "^2.0.1",
 		"@vitest/coverage-v8": "4.1.2",
 		"chalk": "^5.2.0",
 		"esbuild": "^0.25.0",
+		"eslint": "^10.3.0",
 		"eslint-plugin-react": "^7.32.2",
 		"eslint-plugin-react-hooks": "^4.6.0",
 		"prettier": "^2.8.7",
 		"ts-node": "^10.9.1",
 		"tsx": "^4.20.3",
 		"typescript": "^5.0.3",
-		"vitest": "^4.1.0",
-		"xo": "^0.53.1"
-	},
-	"xo": {
-		"extends": "xo-react",
-		"prettier": true,
-		"rules": {
-			"react/prop-types": "off"
-		}
+		"typescript-eslint": "^8.59.2",
+		"vitest": "^4.1.0"
 	},
 	"prettier": "@vdemedes/prettier-config"
 }
