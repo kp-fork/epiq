@@ -13,10 +13,15 @@ import {rankBetween} from '../utils/rank.js';
 import {materializeAll} from './event-materialize.js';
 import {AppEvent} from './event.model.js';
 import {CLOSED_BOARD_ID, CLOSED_SWIMLANE_ID} from './static-ids.js';
+import {NavNode} from '../model/navigation-node.model.js';
+import {AnyContext} from '../model/context.model.js';
 
 const nextId = monotonicFactory();
 
-export function getBootNavigationTarget() {
+export function getBootNavigationTarget(): Result<{
+	currentNode: NavNode<AnyContext>;
+	selectedIndex: number;
+}> {
 	const stateResult = getSafeState();
 	if (isFail(stateResult))
 		return failed('Unable to boot. State not initialized');
@@ -33,39 +38,34 @@ export function getBootNavigationTarget() {
 	const [firstBoard] = getRenderedChildren(workspace.id);
 	const [firstSwimlane] = firstBoard ? getRenderedChildren(firstBoard.id) : [];
 
-	logger.debug('Boot navigation target:', {
-		workspace: workspace?.id,
-		firstBoard: firstBoard?.id,
-		firstSwimlane: firstSwimlane?.id,
-	});
-
 	if (firstSwimlane) {
 		const children = state.renderedChildrenIndex?.[firstSwimlane.id] ?? [];
-		return {
+		return succeeded('Resolved boot nav target', {
 			currentNode: firstSwimlane,
 			selectedIndex: children.length > 0 ? 0 : -1,
-		};
+		});
 	} else if (firstBoard) {
-		return {
+		return succeeded('Resolved boot nav target', {
 			currentNode: firstBoard,
 			selectedIndex: 0,
-		};
+		});
 	} else if (workspace) {
-		return {
+		return succeeded('Resolved boot nav target', {
 			currentNode: workspace,
 			selectedIndex: 0,
-		};
+		});
 	} else {
-		return {
-			currentNode: state.nodes[state.rootNodeId],
+		return succeeded('Resolved boot nav target', {
+			currentNode: state.nodes[state.rootNodeId] as NavNode<AnyContext>,
 			selectedIndex: 0,
-		};
+		});
 	}
 }
 
 export function navigateToInitialNode() {
 	const navigationTarget = getBootNavigationTarget();
-	navigationUtils.navigate(navigationTarget);
+	if (isFail(navigationTarget)) return navigationTarget;
+	return navigationUtils.navigate(navigationTarget.value);
 }
 
 export function createDefaultEvents({
