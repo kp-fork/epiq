@@ -19,7 +19,7 @@ const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE'];
 export const ConfigModifiers = {
 	EDITOR: 'editor',
 	VIEW: 'view',
-	USERNAME: 'userName',
+	USERNAME: 'username',
 	AUTOSYNC: 'autoSync',
 	SYNC_DEBOUNCE_MS: 'syncDebounceMs',
 } as const;

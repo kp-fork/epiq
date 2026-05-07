@@ -1,6 +1,18 @@
 import fs from 'node:fs';
+import {
+	captureNavigationAnchor,
+	restoreNavigationAnchor,
+} from '../lib/actions/default/restore-navigation.js';
+import {bootStateFromEventLog} from '../lib/event/event-boot.js';
+import {loadMergedEvents} from '../lib/event/event-load.js';
+import {
+	getPersistFileName,
+	resolveActorId,
+} from '../lib/event/event-persist.js';
 import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
+import {patchState} from '../lib/state/state.js';
 import {failSync, setSynced, setSyncing} from '../lib/state/sync-state.js';
+import {resolveClosestEpiqProjectRoot} from '../lib/storage/paths.js';
 import {getStateBranch} from './git-constants.js';
 import {
 	ensureStateBranchLayout,
@@ -348,4 +360,50 @@ export const syncEpiqWithRemote = async ({
 		hydrated,
 		bootstrapped,
 	});
+};
+
+// Consider better place for this fn
+export const syncAndHydrateState = async () => {
+	const navigationAnchor = captureNavigationAnchor();
+
+	const userRes = resolveActorId();
+	if (isFail(userRes) || !userRes.value) {
+		return failed('Unable to resolve event log path');
+	}
+
+	const ownEventFileName = getPersistFileName(userRes.value);
+
+	const syncResult = await syncEpiqWithRemote({ownEventFileName});
+	if (isFail(syncResult)) {
+		return failed(`Unable to sync state. ${syncResult.message}`);
+	}
+
+	const epiqRootDirResult = resolveClosestEpiqProjectRoot(process.cwd());
+	if (isFail(epiqRootDirResult)) return epiqRootDirResult;
+
+	const allLoadedEventsResult = loadMergedEvents(epiqRootDirResult.value);
+	if (isFail(allLoadedEventsResult)) {
+		return failed(`Unable to load events. ${allLoadedEventsResult.message}`);
+	}
+
+	const bootResult = bootStateFromEventLog({
+		eventLog: allLoadedEventsResult.value,
+		hasProject: true,
+	});
+	if (isFail(bootResult)) {
+		return failed(`Unable to boot synced state. ${bootResult.message}`);
+	}
+
+	patchState({
+		hasProject: true,
+		syncStatus: {
+			msg: 'Synced',
+			status: 'synced',
+		},
+	});
+
+	const restoreResult = restoreNavigationAnchor(navigationAnchor);
+	if (isFail(restoreResult)) return restoreResult;
+
+	return succeeded('Synced', true);
 };

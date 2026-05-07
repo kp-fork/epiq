@@ -6,6 +6,7 @@ import {
 	moveNodeToSiblingContainer,
 	setMovePendingState,
 } from '../../actions/move/move-actions-utils.js';
+import {materializeAndPersist} from '../../event/event-materialize-and-persist.js';
 import {resolveActorId} from '../../event/event-persist.js';
 import {MovePosition} from '../../event/event.model.js';
 import {Mode} from '../../model/action-map.model.js';
@@ -16,7 +17,6 @@ import {
 } from '../../repository/rank.js';
 import {getCmdState} from '../../state/cmd.state.js';
 import {getRenderedChildren, getState, patchState} from '../../state/state.js';
-import {materializeAndPersist} from '../../event/event-materialize-and-persist.js';
 
 export const moveCommand = () => {
 	const userRes = resolveActorId();

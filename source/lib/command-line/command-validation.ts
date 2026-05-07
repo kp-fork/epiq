@@ -264,11 +264,12 @@ const validateConfigCommand: Validator = ({modifier, inputString}) => {
 			const currentAutoSyncStatus = getSettingsState().autoSync;
 
 			if (!wordList.includes(inputString.trim() as YesNo)) {
+				const currentVal = booleanToYesNo(currentAutoSyncStatus);
 				return invalid({
 					message: buildHint({
-						prefix: `should auto-sync (recommended), currently: ${booleanToYesNo(
-							currentAutoSyncStatus,
-						)} `,
+						prefix: `should auto-sync (recommended)${
+							currentVal !== null ? ', currently: ' + currentVal : ''
+						} `,
 						wordList,
 						noOfHints: 3,
 						inputString,

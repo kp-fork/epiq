@@ -1,11 +1,7 @@
-import {
-	getPersistFileName,
-	resolveActorId,
-} from '../lib/event/event-persist.js';
-import {failed, isFail} from '../lib/model/result-types.js';
+import {failed} from '../lib/model/result-types.js';
 import {getSettingsState} from '../lib/state/settings.state.js';
-import {getState} from '../lib/state/state.js';
-import {syncEpiqWithRemote} from './sync.js';
+import {getState, patchState} from '../lib/state/state.js';
+import {syncAndHydrateState} from './sync.js';
 
 export const MIN_AUTOSYNC_DURATION_MS = 3_000;
 
@@ -55,17 +51,18 @@ export const autoSync = async () => {
 		return failed('Sync already in progress');
 	}
 
-	const userRes = resolveActorId();
-	if (isFail(userRes) || !userRes.value) {
-		return failed('Unable to resolve event log path');
-	}
-
 	autoSyncInFlight = true;
 	lastAutoSyncStartedAt = Date.now();
 
+	patchState({
+		syncStatus: {
+			msg: 'Auto-syncing',
+			status: 'syncing',
+		},
+	});
+
 	try {
-		const ownEventFileName = getPersistFileName(userRes.value);
-		return await syncEpiqWithRemote({ownEventFileName});
+		return await syncAndHydrateState();
 	} finally {
 		autoSyncInFlight = false;
 

@@ -1,10 +1,10 @@
 import z from 'zod';
-import {getCmdState} from '../../state/cmd.state.js';
-import {failed, isFail, succeeded} from '../../model/result-types.js';
 import {setConfig} from '../../config/user-config.js';
+import {Mode} from '../../model/action-map.model.js';
+import {failed, isFail, succeeded} from '../../model/result-types.js';
+import {getCmdState} from '../../state/cmd.state.js';
 import {patchSettingsState} from '../../state/settings.state.js';
 import {patchState} from '../../state/state.js';
-import {Mode} from '../../model/action-map.model.js';
 
 export const setAutoSyncDurationCommand = () => {
 	const selectionVal = getCmdState().commandMeta.inputString;
