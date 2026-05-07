@@ -137,7 +137,6 @@ export const mergeOwnEventFileToStateBranch = ({
 		targetFile: stateBranchFile,
 	});
 };
-
 const ensureSyncReady = async ({
 	cwd,
 	ensureUpstream,
@@ -165,13 +164,20 @@ const ensureSyncReady = async ({
 
 	const stateBranchRoot = stateBranchRootResult.value;
 
-	const repoOpResult = await hasInProgressGitOperation(repoRoot);
-	if (isFail(repoOpResult)) return failed(repoOpResult.message);
+	// Read-only boot hydration should not be blocked by the user's working
+	// repo state. It only needs to reconstruct/read the Epiq state branch.
+	//
+	// Push-capable sync still stays conservative because it may create commits
+	// and push state.
+	if (ensureUpstream) {
+		const repoOpResult = await hasInProgressGitOperation(repoRoot);
+		if (isFail(repoOpResult)) return failed(repoOpResult.message);
 
-	if (repoOpResult.value) {
-		return failed(
-			'Cannot sync while a git operation is in progress in the current repo',
-		);
+		if (repoOpResult.value) {
+			return failed(
+				'Cannot sync while a git operation is in progress in the current repo',
+			);
+		}
 	}
 
 	const initResult = await ensureInitialCommit(repoRoot);

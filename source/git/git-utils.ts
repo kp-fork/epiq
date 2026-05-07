@@ -178,14 +178,14 @@ export const commitAndGetSha = async ({
 		shaResult.value.stdout.trim(),
 	);
 };
-
-export const hasInProgressGitOperation = async (
+export const getInProgressGitOperation = async (
 	repoRoot: string,
-): Promise<Result<boolean>> => {
+): Promise<Result<string | null>> => {
 	const gitDirResult = await getGitDir(repoRoot);
 	if (isFail(gitDirResult)) return failed(gitDirResult.message);
 
 	const gitDir = gitDirResult.value;
+
 	const markers = [
 		'MERGE_HEAD',
 		'CHERRY_PICK_HEAD',
@@ -195,13 +195,25 @@ export const hasInProgressGitOperation = async (
 		'rebase-apply',
 	];
 
-	const activeMarkers = markers.filter(marker =>
+	const activeMarker = markers.find(marker =>
 		fs.existsSync(path.join(gitDir, marker)),
 	);
 
 	return succeeded(
 		'Checked for in-progress Git operation',
-		activeMarkers.length > 0,
+		activeMarker ?? null,
+	);
+};
+
+export const hasInProgressGitOperation = async (
+	repoRoot: string,
+): Promise<Result<boolean>> => {
+	const result = await getInProgressGitOperation(repoRoot);
+	if (isFail(result)) return result;
+
+	return succeeded(
+		'Checked for in-progress Git operation',
+		result.value !== null,
 	);
 };
 
