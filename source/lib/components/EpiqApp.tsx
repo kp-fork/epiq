@@ -5,7 +5,7 @@ import {Mode} from '../model/action-map.model.js';
 import {findInBreadCrumb} from '../model/app-state.model.js';
 import {isSuccess} from '../model/result-types.js';
 import {getSettingsState} from '../state/settings.state.js';
-import {getRenderedChildren, getState, useAppState} from '../state/state.js';
+import {getRenderedChildren, useAppState} from '../state/state.js';
 import {CommandPalette} from './CommandPalette.js';
 import {ContextBar} from './ContextBar.js';
 import {HelpUI} from './Help.js';
@@ -85,7 +85,7 @@ export default function EpiqApp({width, height}: EpiqAppProps) {
 		);
 	}
 
-	const board = findInBreadCrumb(getState().breadCrumb ?? [], 'BOARD');
+	const board = findInBreadCrumb(state.breadCrumb ?? [], 'BOARD');
 
 	if (isSuccess(board)) {
 		const boardId = board.value.id;

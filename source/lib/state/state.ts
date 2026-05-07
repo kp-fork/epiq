@@ -108,6 +108,12 @@ export const getState = () => {
 
 	return _appState;
 };
+export const getSafeState = () => {
+	if (!_appState)
+		return failed('State not initialized. Call initWorkspaceState() first.');
+
+	return succeeded('Retrieved state', _appState);
+};
 
 export function initWorkspaceState(workspace: Workspace) {
 	_initialWorkspace = workspace;

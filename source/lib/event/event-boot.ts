@@ -5,7 +5,7 @@ import {failed, isFail, Result, succeeded} from '../model/result-types.js';
 import {nodes} from '../state/node-builder.js';
 import {
 	getRenderedChildren,
-	getState,
+	getSafeState,
 	initWorkspaceState,
 	patchState,
 } from '../state/state.js';
@@ -17,7 +17,12 @@ import {CLOSED_BOARD_ID, CLOSED_SWIMLANE_ID} from './static-ids.js';
 const nextId = monotonicFactory();
 
 export function getBootNavigationTarget() {
-	const workspace = Object.values(getState().nodes).find(
+	const stateResult = getSafeState();
+	if (isFail(stateResult))
+		return failed('Unable to boot. State not initialized');
+	const state = stateResult.value;
+
+	const workspace = Object.values(state.nodes).find(
 		node => node.context === 'WORKSPACE',
 	);
 
@@ -33,8 +38,9 @@ export function getBootNavigationTarget() {
 		firstBoard: firstBoard?.id,
 		firstSwimlane: firstSwimlane?.id,
 	});
+
 	if (firstSwimlane) {
-		const children = getState().renderedChildrenIndex?.[firstSwimlane.id] ?? [];
+		const children = state.renderedChildrenIndex?.[firstSwimlane.id] ?? [];
 		return {
 			currentNode: firstSwimlane,
 			selectedIndex: children.length > 0 ? 0 : -1,
@@ -51,7 +57,7 @@ export function getBootNavigationTarget() {
 		};
 	} else {
 		return {
-			currentNode: getState().nodes[getState().rootNodeId],
+			currentNode: state.nodes[state.rootNodeId],
 			selectedIndex: 0,
 		};
 	}
@@ -234,7 +240,6 @@ export function bootStateFromEventLog({
 			`Materializing failed:\n${failures.map(x => x.message).join('\n')}`,
 		);
 	}
-
 	navigateToInitialNode();
 
 	patchState({
