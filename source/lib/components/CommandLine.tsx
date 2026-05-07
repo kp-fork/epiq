@@ -206,7 +206,7 @@ export const CommandLine: React.FC<{width: number; mode: ModeUnion}> = ({
 		const afterCursor =
 			safeCursor < value.length ? value.slice(safeCursor + 1) : '';
 
-		let renderedBefore = Array.from(beforeCursor)
+		const renderedBefore = Array.from(beforeCursor)
 			.map((char, index) => styleCharAt(char, index))
 			.join('');
 
