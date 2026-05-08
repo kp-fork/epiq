@@ -180,10 +180,11 @@ describe('event boot', () => {
 
 		expect(isFail(result)).toBe(false);
 
-		const target = getBootNavigationTarget();
+		const targetResult = getBootNavigationTarget();
+		if (isFail(targetResult)) throw targetResult;
 
-		expect(target.currentNode?.id).toBe('swimlane-1');
-		expect(target.selectedIndex).toBe(-1);
+		expect(targetResult.value.currentNode?.id).toBe('swimlane-1');
+		expect(targetResult.value.selectedIndex).toBe(-1);
 	});
 
 	it('returns the first board as boot navigation target when no swimlane exists', () => {
@@ -206,10 +207,11 @@ describe('event boot', () => {
 
 		expect(isFail(result)).toBe(false);
 
-		const target = getBootNavigationTarget();
+		const targetResult = getBootNavigationTarget();
+		if (isFail(targetResult)) throw targetResult;
 
-		expect(target.currentNode?.id).toBe('board-1');
-		expect(target.selectedIndex).toBe(0);
+		expect(targetResult.value.currentNode?.id).toBe('board-1');
+		expect(targetResult.value.selectedIndex).toBe(0);
 	});
 
 	it('fails boot when event materialization fails', () => {

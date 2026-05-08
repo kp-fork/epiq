@@ -19,6 +19,11 @@ export type ResolveRankResult = {
 	needsRebalance: boolean;
 };
 
+type Actor = {
+	userId: string;
+	userName: string;
+};
+
 export const resolveCreateRank = (
 	parentId: string,
 ): Result<ResolveRankResult> =>
@@ -87,14 +92,13 @@ export const resolveMoveRank = (
 	}
 };
 
-export const getOrderedChildren = (parentId: string) => {
-	return Object.values(getState().nodes)
+export const getOrderedChildren = (parentId: string) =>
+	Object.values(getState().nodes)
 		.filter(
 			(node): node is NavNode<AnyContext> =>
 				!!node && !node.isDeleted && node.parentNodeId === parentId,
 		)
 		.sort((a, b) => a.rank.localeCompare(b.rank));
-};
 
 export const getSiblingIndex = (
 	siblings: NavNode<AnyContext>[],
@@ -111,21 +115,12 @@ export const resolveRankForParent = (
 		position,
 	);
 
-/**
- * Resolves a rank for moving/repositioning an existing child.
- *
- * Side effect warning:
- * If the target parent has no available rank space, this function will create,
- * materialize, and persist a `rebalance.children` event before retrying.
- *
- * Use only from command/API layers where writing additional events is allowed.
- * Do not call from materializers or pure read paths.
- */
 export const resolveAndPersistRankForMove = (
 	parentId: string,
 	nodeId: string,
 	position: MovePosition,
-	user: {userId: string; userName: string},
+	user: Actor,
+	stateBranchRoot: string,
 ): Result<string> => {
 	const first = resolveRankForParent(nodeId, parentId, position);
 	if (isFail(first)) return first;
@@ -137,7 +132,10 @@ export const resolveAndPersistRankForMove = (
 	const rebalanceEvent = createRebalanceChildrenEvent(parentId, user);
 	if (isFail(rebalanceEvent)) return rebalanceEvent;
 
-	const rebalanceResult = materializeAndPersist(rebalanceEvent.value);
+	const rebalanceResult = materializeAndPersist(
+		rebalanceEvent.value,
+		stateBranchRoot,
+	);
 	if (isFail(rebalanceResult)) return rebalanceResult;
 
 	const second = resolveRankForParent(nodeId, parentId, position);
@@ -150,19 +148,10 @@ export const resolveAndPersistRankForMove = (
 	return succeeded('Resolved rank after rebalance', second.value.rank);
 };
 
-/**
- * Resolves a rank for creating a new child at the end of a parent.
- *
- * Side effect warning:
- * If the target parent has no available rank space, this function will create,
- * materialize, and persist a `rebalance.children` event before retrying.
- *
- * Use only from command/API layers where writing additional events is allowed.
- * Do not call from materializers or pure read paths.
- */
 export const resolveAndPersistRankForCreate = (
 	parentId: string,
-	user: {userId: string; userName: string},
+	user: Actor,
+	stateBranchRoot: string,
 ): Result<string> => {
 	const first = resolveCreateRank(parentId);
 	if (isFail(first)) return first;
@@ -174,7 +163,10 @@ export const resolveAndPersistRankForCreate = (
 	const rebalanceEvent = createRebalanceChildrenEvent(parentId, user);
 	if (isFail(rebalanceEvent)) return rebalanceEvent;
 
-	const rebalanceResult = materializeAndPersist(rebalanceEvent.value);
+	const rebalanceResult = materializeAndPersist(
+		rebalanceEvent.value,
+		stateBranchRoot,
+	);
 	if (isFail(rebalanceResult)) return rebalanceResult;
 
 	const second = resolveCreateRank(parentId);

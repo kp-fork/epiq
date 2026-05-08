@@ -6,6 +6,26 @@ import {
 	succeeded,
 } from '../../lib/model/result-types.js';
 
+vi.mock('../../git/sync.js', () => ({
+	syncEpiqFromRemote: vi.fn(() =>
+		succeeded('Synced from remote', {
+			repoRoot: '/repo',
+			stateBranchRoot: '/state',
+		}),
+	),
+	syncEpiqWithRemote: vi.fn(() =>
+		succeeded('Synced', {
+			repoRoot: '/repo',
+			stateBranchRoot: '/state',
+			createdCommit: false,
+			pulled: false,
+			pushed: false,
+			bootstrapped: false,
+		}),
+	),
+	syncAndReloadState: vi.fn(() => succeeded('Synced', true)),
+}));
+
 vi.mock('../../lib/storage/paths.js', async importOriginal => {
 	const actual = await importOriginal<
 		typeof import('../../lib/storage/paths.js')
@@ -13,15 +33,10 @@ vi.mock('../../lib/storage/paths.js', async importOriginal => {
 
 	return {
 		...actual,
-		resolveClosestEpiqRoot: vi.fn((dir: string) => ({
+		resolveClosestEpiqProjectRoot: vi.fn((dir: string) => ({
 			status: 'success',
-			message: 'Resolved closest .epiq root',
+			message: 'Resolved closest epiq project root',
 			value: dir,
-		})),
-		ensureEventsDir: vi.fn(() => ({
-			status: 'success',
-			message: 'Ensured events directory',
-			value: undefined,
 		})),
 	};
 });
@@ -142,12 +157,20 @@ const nodes: Record<string, any> = {
 };
 
 vi.mock('../../lib/state/state.js', () => ({
-	getState: () => ({
-		nodes,
-		rootNodeId: 'workspace-1',
-		currentNode: nodes['swimlane-1'],
-		selectedIndex: 0,
-		eventLog: [],
+	getSafeState: () => ({
+		status: 'success',
+		message: 'Resolved safe state',
+		value: {
+			nodes,
+			rootNodeId: 'workspace-1',
+			currentNode: nodes['swimlane-1'],
+			selectedIndex: 0,
+			eventLog: [],
+			syncStatus: {
+				status: 'synced',
+				msg: 'Synced',
+			},
+		},
 	}),
 	getRenderedChildren: (id: string) => {
 		if (id === 'issue-1') return [nodes['field-description']];
@@ -200,8 +223,8 @@ describe('mcp tools', () => {
 		vi.clearAllMocks();
 	});
 
-	it('lists boards', () => {
-		const result = tools.listBoards({repoRoot: '/repo'});
+	it('lists boards', async () => {
+		const result = await tools.listBoards({repoRoot: '/repo'});
 
 		expect(isFail(result)).toBe(false);
 		if (!isFail(result)) {
@@ -216,8 +239,8 @@ describe('mcp tools', () => {
 		}
 	});
 
-	it('lists swimlanes', () => {
-		const result = tools.listSwimlanes({
+	it('lists swimlanes', async () => {
+		const result = await tools.listSwimlanes({
 			repoRoot: '/repo',
 			boardId: 'board-1',
 		});
@@ -232,8 +255,8 @@ describe('mcp tools', () => {
 		}
 	});
 
-	it('lists issues', () => {
-		const result = tools.listIssues({
+	it('lists issues', async () => {
+		const result = await tools.listIssues({
 			repoRoot: '/repo',
 			includeClosed: false,
 		});
@@ -253,8 +276,8 @@ describe('mcp tools', () => {
 		}
 	});
 
-	it('creates an issue', () => {
-		const result = tools.createIssue({
+	it('creates an issue', async () => {
+		const result = await tools.createIssue({
 			repoRoot: '/repo',
 			title: 'New issue',
 			parentId: 'swimlane-1',
@@ -268,10 +291,24 @@ describe('mcp tools', () => {
 				parentId: 'swimlane-1',
 			});
 		}
+
+		expect(persistModule.materializeAndPersistAll).toHaveBeenCalledWith(
+			[
+				expect.objectContaining({
+					action: 'add.issue',
+					payload: expect.objectContaining({
+						id: 'issue-created-1',
+						parent: 'swimlane-1',
+						rank: 'm0',
+					}),
+				}),
+			],
+			'/state',
+		);
 	});
 
-	it('fails creating an issue when parent is missing', () => {
-		const result = tools.createIssue({
+	it('fails creating an issue when parent is missing', async () => {
+		const result = await tools.createIssue({
 			repoRoot: '/repo',
 			title: 'New issue',
 			parentId: 'missing',
@@ -283,8 +320,8 @@ describe('mcp tools', () => {
 		}
 	});
 
-	it('closes an issue', () => {
-		const result = tools.closeIssue({
+	it('closes an issue', async () => {
+		const result = await tools.closeIssue({
 			repoRoot: '/repo',
 			issueId: 'issue-1',
 		});
@@ -295,10 +332,23 @@ describe('mcp tools', () => {
 				id: 'issue-1',
 			});
 		}
+
+		expect(persistModule.materializeAndPersistAll).toHaveBeenCalledWith(
+			[
+				expect.objectContaining({
+					action: 'close.issue',
+					payload: expect.objectContaining({
+						id: 'issue-1',
+						rank: 'm0',
+					}),
+				}),
+			],
+			'/state',
+		);
 	});
 
-	it('moves an issue', () => {
-		const result = tools.moveIssue({
+	it('moves an issue', async () => {
+		const result = await tools.moveIssue({
 			repoRoot: '/repo',
 			issueId: 'issue-1',
 			parentId: 'swimlane-2',
@@ -313,20 +363,23 @@ describe('mcp tools', () => {
 			});
 		}
 
-		expect(persistModule.materializeAndPersistAll).toHaveBeenCalledWith([
-			expect.objectContaining({
-				action: 'move.node',
-				payload: expect.objectContaining({
-					id: 'issue-1',
-					parent: 'swimlane-2',
-					rank: expect.any(String),
+		expect(persistModule.materializeAndPersistAll).toHaveBeenCalledWith(
+			[
+				expect.objectContaining({
+					action: 'move.node',
+					payload: expect.objectContaining({
+						id: 'issue-1',
+						parent: 'swimlane-2',
+						rank: expect.any(String),
+					}),
 				}),
-			}),
-		]);
+			],
+			'/state',
+		);
 	});
 
-	it('fails moving to readonly swimlane', () => {
-		const result = tools.moveIssue({
+	it('fails moving to readonly swimlane', async () => {
+		const result = await tools.moveIssue({
 			repoRoot: '/repo',
 			issueId: 'issue-1',
 			parentId: 'readonly-swimlane',
@@ -338,12 +391,13 @@ describe('mcp tools', () => {
 		}
 	});
 
-	it('gets full Epiq state', () => {
-		const result = tools.getEpiqState({repoRoot: '/repo'});
+	it('gets full Epiq state', async () => {
+		const result = await tools.getEpiqState({repoRoot: '/repo'});
 
 		expect(isFail(result)).toBe(false);
 		if (!isFail(result)) {
 			expect(result.value.root).toBe('/repo');
+			expect(result.value.stateBranchRoot).toBe('/state');
 			expect(result.value.rootNodeId).toBe('workspace-1');
 			expect(result.value.nodes).toBe(nodes);
 		}

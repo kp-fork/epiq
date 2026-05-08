@@ -2,9 +2,8 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {failed, isFail, Result, succeeded} from '../lib/model/result-types.js';
-import {getGitDir} from './git-storage.js';
-import {ORIGIN} from './git-constants.js';
 import {git} from './git-commands.js';
+import {ORIGIN} from './git-constants.js';
 
 export type GitExecResult = {
 	stdout: string;
@@ -354,6 +353,66 @@ export const isNonFastForward = (message: string): boolean =>
 	message.includes('non-fast-forward') ||
 	message.includes('failed to push some refs');
 
+export const abortRebaseIfPresent = async (
+	cwd: string,
+): Promise<Result<boolean>> => {
+	const result = await execGitAllowFail({
+		cwd,
+		args: ['rebase', '--abort'],
+	});
+
+	if (result.exitCode === 0) {
+		return succeeded('Aborted stale rebase', true);
+	}
+
+	return succeeded('No rebase to abort', false);
+};
+
+export const resetBranchHardToRemote = async ({
+	cwd,
+	branch,
+}: {
+	cwd: string;
+	branch: string;
+}): Promise<Result<boolean>> => {
+	const remoteBranchResult = await hasRemoteBranch({
+		repoRoot: cwd,
+		branch,
+	});
+
+	if (isFail(remoteBranchResult)) return failed(remoteBranchResult.message);
+
+	if (!remoteBranchResult.value) {
+		return succeeded('Remote branch missing, skipped reset', false);
+	}
+
+	const fetchResult = await git.fetch({
+		cwd,
+		remote: ORIGIN,
+		branch,
+	});
+
+	if (isFail(fetchResult)) {
+		return failed(`Failed to fetch ${branch}\n${fetchResult.message}`);
+	}
+
+	const abortResult = await abortRebaseIfPresent(cwd);
+	if (isFail(abortResult)) return failed(abortResult.message);
+
+	const resetResult = await execGit({
+		cwd,
+		args: ['reset', '--hard', `${ORIGIN}/${branch}`],
+	});
+
+	if (isFail(resetResult)) {
+		return failed(
+			`Failed to reset ${branch} from remote\n${resetResult.message}`,
+		);
+	}
+
+	return succeeded('Reset branch from remote', true);
+};
+
 export const pullBranchRebaseIfPresent = async ({
 	cwd,
 	branch,
@@ -367,14 +426,19 @@ export const pullBranchRebaseIfPresent = async ({
 	});
 
 	if (isFail(remoteBranchResult)) return failed(remoteBranchResult.message);
+
 	if (!remoteBranchResult.value) {
 		return succeeded('Remote branch missing, skipped pull', false);
 	}
 
+	const abortResult = await abortRebaseIfPresent(cwd);
+	if (isFail(abortResult)) return failed(abortResult.message);
+
 	const fetchResult = await git.fetch({cwd, remote: ORIGIN, branch});
 
-	if (isFail(fetchResult))
+	if (isFail(fetchResult)) {
 		return failed(`Failed to fetch ${branch}\n${fetchResult.message}`);
+	}
 
 	const pullResult = await git.pullRebase({cwd, remote: ORIGIN, branch});
 

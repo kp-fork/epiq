@@ -1,7 +1,11 @@
-import {failed} from '../lib/model/result-types.js';
+import {failed, isFail} from '../lib/model/result-types.js';
 import {getSettingsState} from '../lib/state/settings.state.js';
-import {getState, isStateInitialized, patchState} from '../lib/state/state.js';
-import {syncAndHydrateState} from './sync.js';
+import {
+	getSafeState,
+	isStateInitialized,
+	patchState,
+} from '../lib/state/state.js';
+import {syncAndReloadState} from './sync.js';
 
 export const MIN_AUTOSYNC_DURATION_MS = 3_000;
 
@@ -20,12 +24,19 @@ let queuedAutoSyncTimer: NodeJS.Timeout | undefined;
 let autoSyncInFlight = false;
 let pendingAutoSync = false;
 
-const isSyncing = () =>
-	autoSyncInFlight || getState().syncStatus.status === 'syncing';
+const isSyncing = () => {
+	if (autoSyncInFlight) return true;
+
+	const stateResult = getSafeState();
+	if (isFail(stateResult)) return false;
+
+	return stateResult.value.syncStatus.status === 'syncing';
+};
 
 const getAutoSyncDelay = () => {
 	const intervalMs = getSettingsState().autoSyncIntervalMs ?? 15_000;
 	const elapsed = Date.now() - lastAutoSyncStartedAt;
+
 	return Math.max(0, intervalMs - elapsed);
 };
 
@@ -68,7 +79,7 @@ export const autoSync = async () => {
 	});
 
 	try {
-		return await syncAndHydrateState();
+		return await syncAndReloadState();
 	} finally {
 		autoSyncInFlight = false;
 

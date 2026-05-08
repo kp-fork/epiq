@@ -1,5 +1,9 @@
 import {ulid} from 'ulid';
-import {syncEpiqWithRemote} from '../git/sync.js';
+import {
+	syncAndReloadState,
+	resetHardToRemoteState,
+	syncEpiqWithRemote,
+} from '../git/sync.js';
 import {loadSettingsFromConfig} from '../lib/config/user-config.js';
 import {createIssueEvents} from '../lib/event/common-events.js';
 import {bootStateFromEventLog} from '../lib/event/event-boot.js';
@@ -15,10 +19,14 @@ import {
 	resolveAndPersistRankForCreate,
 	resolveAndPersistRankForMove,
 } from '../lib/repository/rank.js';
-import {getRenderedChildren, getState} from '../lib/state/state.js';
-import {resolveClosestEpiqRoot} from '../lib/storage/paths.js';
+import {getRenderedChildren, getSafeState} from '../lib/state/state.js';
+import {resolveClosestEpiqProjectRoot} from '../lib/storage/paths.js';
 import {sanitizeInlineText} from '../lib/utils/string.utils.js';
 import {getFieldValue} from '../lib/utils/ticket.utils.js';
+
+type ToolInput = {
+	repoRoot?: string;
+};
 
 type SyncInput = ToolInput;
 
@@ -26,10 +34,6 @@ type MoveIssueInput = ToolInput & {
 	issueId: string;
 	parentId: string;
 	position?: MovePosition;
-};
-
-type ToolInput = {
-	repoRoot?: string;
 };
 
 type ListIssuesInput = ToolInput & {
@@ -50,7 +54,8 @@ type CloseIssueInput = ToolInput & {
 };
 
 type BootResult = {
-	root: string;
+	repoRoot: string;
+	stateBranchRoot: string;
 };
 
 type Actor = {
@@ -58,11 +63,23 @@ type Actor = {
 	userName: string;
 };
 
-const boot = (repoRoot?: string): Result<BootResult> => {
-	const epiqRootResult = resolveClosestEpiqRoot(repoRoot ?? process.cwd());
-	if (isFail(epiqRootResult)) return epiqRootResult;
+const resolveRepoRoot = (repoRoot?: string): Result<string> => {
+	const result = resolveClosestEpiqProjectRoot(repoRoot ?? process.cwd());
+	if (isFail(result)) return failed(result.message);
 
-	const eventsResult = loadMergedEvents(epiqRootResult.value);
+	return succeeded('Resolved Epiq repo root', result.value);
+};
+
+const boot = async (repoRoot?: string): Promise<Result<BootResult>> => {
+	const repoRootResult = resolveRepoRoot(repoRoot);
+	if (isFail(repoRootResult)) return repoRootResult;
+
+	const syncResult = await resetHardToRemoteState(repoRootResult.value);
+	if (isFail(syncResult)) return failed(syncResult.message);
+
+	const {stateBranchRoot} = syncResult.value;
+
+	const eventsResult = loadMergedEvents(stateBranchRoot);
 	if (isFail(eventsResult)) return failed(eventsResult.message);
 
 	const bootResult = bootStateFromEventLog({
@@ -71,7 +88,10 @@ const boot = (repoRoot?: string): Result<BootResult> => {
 	});
 	if (isFail(bootResult)) return failed(bootResult.message);
 
-	return succeeded('Booted Epiq state', {root: epiqRootResult.value});
+	return succeeded('Booted Epiq state', {
+		repoRoot: repoRootResult.value,
+		stateBranchRoot,
+	});
 };
 
 const getActor = (): Result<Actor> => {
@@ -79,13 +99,21 @@ const getActor = (): Result<Actor> => {
 	if (isFail(actorResult)) return failed(actorResult.message);
 
 	if (!actorResult.value.userId) return failed('Unable to retrieve user id');
-	if (!actorResult.value.userName)
+	if (!actorResult.value.userName) {
 		return failed('Unable to retrieve user name');
+	}
 
 	return succeeded('Resolved actor', {
 		userId: actorResult.value.userId,
 		userName: actorResult.value.userName,
 	});
+};
+
+const getStateResult = () => {
+	const stateResult = getSafeState();
+	if (isFail(stateResult)) return failed(stateResult.message);
+
+	return stateResult;
 };
 
 const getReferencedIds = (
@@ -116,11 +144,14 @@ const getIssueAssignees = (ticket: Ticket) =>
 		.filter(Boolean)
 		.map(c => ({id: c!.id, name: c!.name}));
 
-export const listBoards = (input: ToolInput = {}) => {
-	const bootResult = boot(input.repoRoot);
+export const listBoards = async (input: ToolInput = {}) => {
+	const bootResult = await boot(input.repoRoot);
 	if (isFail(bootResult)) return bootResult;
 
-	const boards = Object.values(getState().nodes)
+	const stateResult = getStateResult();
+	if (isFail(stateResult)) return stateResult;
+
+	const boards = Object.values(stateResult.value.nodes)
 		.filter(n => n.context === 'BOARD')
 		.map(n => ({
 			id: n.id,
@@ -132,11 +163,14 @@ export const listBoards = (input: ToolInput = {}) => {
 	return succeeded('Listed boards', boards);
 };
 
-export const listSwimlanes = (input: ListSwimlanesInput = {}) => {
-	const bootResult = boot(input.repoRoot);
+export const listSwimlanes = async (input: ListSwimlanesInput = {}) => {
+	const bootResult = await boot(input.repoRoot);
 	if (isFail(bootResult)) return bootResult;
 
-	const swimlanes = Object.values(getState().nodes)
+	const stateResult = getStateResult();
+	if (isFail(stateResult)) return stateResult;
+
+	const swimlanes = Object.values(stateResult.value.nodes)
 		.filter(n => n.context === 'SWIMLANE')
 		.filter(n => !input.boardId || n.parentNodeId === input.boardId)
 		.map(n => ({
@@ -150,11 +184,14 @@ export const listSwimlanes = (input: ListSwimlanesInput = {}) => {
 	return succeeded('Listed swimlanes', swimlanes);
 };
 
-export const listIssues = (input: ListIssuesInput) => {
-	const bootResult = boot(input.repoRoot);
+export const listIssues = async (input: ListIssuesInput) => {
+	const bootResult = await boot(input.repoRoot);
 	if (isFail(bootResult)) return bootResult;
 
-	const issues = Object.values(getState().nodes)
+	const stateResult = getStateResult();
+	if (isFail(stateResult)) return stateResult;
+
+	const issues = Object.values(stateResult.value.nodes)
 		.filter(isTicketNode)
 		.filter(n => input.includeClosed || n.parentNodeId !== CLOSED_SWIMLANE_ID)
 		.map(n => ({
@@ -171,8 +208,8 @@ export const listIssues = (input: ListIssuesInput) => {
 	return succeeded('Listed issues', issues);
 };
 
-export const createIssue = (input: CreateIssueInput) => {
-	const bootResult = boot(input.repoRoot);
+export const createIssue = async (input: CreateIssueInput) => {
+	const bootResult = await boot(input.repoRoot);
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -181,6 +218,7 @@ export const createIssue = (input: CreateIssueInput) => {
 	const rankResult = resolveAndPersistRankForCreate(
 		input.parentId,
 		actorResult.value,
+		bootResult.value.stateBranchRoot,
 	);
 	if (isFail(rankResult)) return rankResult;
 
@@ -190,14 +228,18 @@ export const createIssue = (input: CreateIssueInput) => {
 		user: actorResult.value,
 		rank: rankResult.value,
 	});
-
 	if (isFail(issueEventsResult)) return issueEventsResult;
 
 	const issueEvents = issueEventsResult.value;
-
-	const results = materializeAndPersistAll(issueEvents);
+	const results = materializeAndPersistAll(
+		issueEvents,
+		bootResult.value.stateBranchRoot,
+	);
 	const failure = results.find(isFail);
 	if (failure) return failed(failure.message);
+
+	const syncResult = await syncAndReloadState();
+	if (isFail(syncResult)) return syncResult;
 
 	const issueId = issueEvents.find(e => e.action === 'add.issue')?.payload.id;
 	if (!issueId) return failed('Unable to determine created issue id');
@@ -209,8 +251,8 @@ export const createIssue = (input: CreateIssueInput) => {
 	});
 };
 
-export const closeIssue = (input: CloseIssueInput) => {
-	const bootResult = boot(input.repoRoot);
+export const closeIssue = async (input: CloseIssueInput) => {
+	const bootResult = await boot(input.repoRoot);
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -221,6 +263,7 @@ export const closeIssue = (input: CloseIssueInput) => {
 		input.issueId,
 		{at: 'end'},
 		actorResult.value,
+		bootResult.value.stateBranchRoot,
 	);
 	if (isFail(rankResult)) return rankResult;
 
@@ -235,15 +278,21 @@ export const closeIssue = (input: CloseIssueInput) => {
 		},
 	} satisfies AppEvent<'close.issue'>;
 
-	const results = materializeAndPersistAll([event]);
+	const results = materializeAndPersistAll(
+		[event],
+		bootResult.value.stateBranchRoot,
+	);
 	const failure = results.find(isFail);
 	if (failure) return failed(failure.message);
+
+	const syncResult = await syncAndReloadState();
+	if (isFail(syncResult)) return syncResult;
 
 	return succeeded('Closed issue', {id: input.issueId});
 };
 
-export const moveIssue = (input: MoveIssueInput) => {
-	const bootResult = boot(input.repoRoot);
+export const moveIssue = async (input: MoveIssueInput) => {
+	const bootResult = await boot(input.repoRoot);
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -254,6 +303,7 @@ export const moveIssue = (input: MoveIssueInput) => {
 		input.issueId,
 		input.position ?? {at: 'end'},
 		actorResult.value,
+		bootResult.value.stateBranchRoot,
 	);
 	if (isFail(rankResult)) return rankResult;
 
@@ -268,9 +318,15 @@ export const moveIssue = (input: MoveIssueInput) => {
 		},
 	} satisfies AppEvent<'move.node'>;
 
-	const results = materializeAndPersistAll([event]);
+	const results = materializeAndPersistAll(
+		[event],
+		bootResult.value.stateBranchRoot,
+	);
 	const failure = results.find(isFail);
 	if (failure) return failed(failure.message);
+
+	const syncResult = await syncAndReloadState();
+	if (isFail(syncResult)) return syncResult;
 
 	return succeeded('Moved issue', {
 		id: input.issueId,
@@ -279,31 +335,36 @@ export const moveIssue = (input: MoveIssueInput) => {
 };
 
 export const sync = async (input: SyncInput = {}) => {
-	const root = resolveClosestEpiqRoot(input.repoRoot ?? process.cwd());
-	if (isFail(root)) return failed('Sync failed');
+	const repoRootResult = resolveRepoRoot(input.repoRoot);
+	if (isFail(repoRootResult)) return failed('Sync failed');
 
 	const actor = getActor();
 	if (isFail(actor)) return actor;
 
 	const result = await syncEpiqWithRemote({
-		cwd: root.value,
+		cwd: repoRootResult.value,
 		ownEventFileName: getPersistFileName(actor.value),
 	});
 
 	if (isFail(result)) return result;
+
 	return succeeded('Synced', result.value);
 };
 
-export const getEpiqState = (input: ToolInput = {}) => {
-	const bootResult = boot(input.repoRoot);
+export const getEpiqState = async (input: ToolInput = {}) => {
+	const bootResult = await boot(input.repoRoot);
 	if (isFail(bootResult)) return bootResult;
 
+	const stateResult = getStateResult();
+	if (isFail(stateResult)) return stateResult;
+
 	return succeeded('Retrieved Epiq state', {
-		root: bootResult.value.root,
-		nodes: getState().nodes,
-		rootNodeId: getState().rootNodeId,
-		currentNode: getState().currentNode,
-		selectedIndex: getState().selectedIndex,
-		eventLog: getState().eventLog,
+		root: bootResult.value.repoRoot,
+		stateBranchRoot: bootResult.value.stateBranchRoot,
+		nodes: stateResult.value.nodes,
+		rootNodeId: stateResult.value.rootNodeId,
+		currentNode: stateResult.value.currentNode,
+		selectedIndex: stateResult.value.selectedIndex,
+		eventLog: stateResult.value.eventLog,
 	});
 };

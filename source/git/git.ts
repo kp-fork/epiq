@@ -36,6 +36,7 @@ export const ensureInitialCommit = async (
 	if (headResult.exitCode === 0) {
 		return succeeded('Initial commit already exists', false);
 	}
+
 	logger.info('Creating initial commit');
 
 	const commitResult = await git.commit({
@@ -66,11 +67,12 @@ const buildSyncCommitMessage = async (
 	const shaResult = await getShortHeadSha(repoRoot);
 	if (isFail(shaResult)) return failed(shaResult.message);
 
-	const message = `[epiq:sync:${sanitizeRefSegment(
-		branchResult.value,
-	)}:${sanitizeRefSegment(shaResult.value)}]`;
-
-	return succeeded('Built sync commit message', message);
+	return succeeded(
+		'Built sync commit message',
+		`[epiq:sync:${sanitizeRefSegment(branchResult.value)}:${sanitizeRefSegment(
+			shaResult.value,
+		)}]`,
+	);
 };
 
 export const createStateBranch = async ({
@@ -112,72 +114,99 @@ export const createStateBranch = async ({
 const ensureLocalStateBranch = async ({
 	repoRoot,
 	stateBranchName,
+	preferRemote,
 }: {
 	repoRoot: string;
 	stateBranchName: string;
+	preferRemote: boolean;
 }): Promise<Result<boolean>> => {
-	const localResult = await hasLocalBranch({
-		repoRoot,
-		branch: stateBranchName,
-	});
-	if (isFail(localResult)) {
-		return failed('Ensure local state branch failed\n' + localResult.message);
-	}
-
-	if (localResult.value) {
-		return succeeded('Local state branch already exists', false);
-	}
-
 	const remoteResult = await hasRemote({repoRoot});
 	if (isFail(remoteResult)) {
 		return failed('Ensure local state branch failed\n' + remoteResult.message);
 	}
 
-	if (!remoteResult.value) {
-		return createStateBranch({repoRoot, stateBranchName});
-	}
+	const hasRemoteRepo = remoteResult.value;
 
-	const remoteBranchResult = await hasRemoteBranch({
-		repoRoot,
-		branch: stateBranchName,
-	});
+	const remoteBranchResult = hasRemoteRepo
+		? await hasRemoteBranch({repoRoot, branch: stateBranchName})
+		: succeeded('No remote, no remote state branch', false);
+
 	if (isFail(remoteBranchResult)) {
 		return failed(
 			'Ensure local state branch failed\n' + remoteBranchResult.message,
 		);
 	}
 
-	if (!remoteBranchResult.value) {
-		return createStateBranch({repoRoot, stateBranchName});
+	const hasRemoteStateBranch = remoteBranchResult.value;
+
+	if (hasRemoteRepo && hasRemoteStateBranch) {
+		const fetchResult = await git.fetch({
+			cwd: repoRoot,
+			remote: ORIGIN,
+			branch: stateBranchName,
+		});
+
+		if (isFail(fetchResult)) {
+			return failed(
+				`Failed to fetch ${stateBranchName} from remote\n${fetchResult.message}`,
+			);
+		}
 	}
 
-	const fetchResult = await git.fetch({
-		cwd: repoRoot,
-		remote: ORIGIN,
+	const localResult = await hasLocalBranch({
+		repoRoot,
 		branch: stateBranchName,
 	});
-	if (isFail(fetchResult)) {
-		return failed(
-			`Failed to fetch ${stateBranchName} from remote\n${fetchResult.message}`,
-		);
+
+	if (isFail(localResult)) {
+		return failed('Ensure local state branch failed\n' + localResult.message);
 	}
 
-	const createFromRemoteResult = await execGit({
-		args: [
-			'branch',
-			'--track',
-			stateBranchName,
-			`${ORIGIN}/${stateBranchName}`,
-		],
-		cwd: repoRoot,
-	});
-	if (isFail(createFromRemoteResult)) {
-		return failed(
-			`Failed to create local ${stateBranchName} from remote\n${createFromRemoteResult.message}`,
-		);
+	if (localResult.value) {
+		if (preferRemote && hasRemoteStateBranch) {
+			const resetRefResult = await execGit({
+				cwd: repoRoot,
+				args: [
+					'branch',
+					'--force',
+					stateBranchName,
+					`${ORIGIN}/${stateBranchName}`,
+				],
+			});
+
+			if (isFail(resetRefResult)) {
+				return failed(
+					`Failed to reset local ${stateBranchName} from remote\n${resetRefResult.message}`,
+				);
+			}
+
+			return succeeded('Reset local state branch from remote', true);
+		}
+
+		return succeeded('Local state branch already exists', false);
 	}
 
-	return succeeded('Created local state branch from remote', true);
+	if (hasRemoteStateBranch) {
+		const createFromRemoteResult = await execGit({
+			args: [
+				'branch',
+				'--track',
+				stateBranchName,
+				`${ORIGIN}/${stateBranchName}`,
+			],
+			cwd: repoRoot,
+		});
+
+		if (isFail(createFromRemoteResult)) {
+			return failed(
+				`Failed to create local ${stateBranchName} from remote\n${createFromRemoteResult.message}`,
+			);
+		}
+
+		return succeeded('Created local state branch from remote', true);
+	}
+
+	return createStateBranch({repoRoot, stateBranchName});
 };
 
 const getWorktreeRootForBranch = async ({
@@ -331,9 +360,6 @@ export const ensureStateBranchWorktree = async ({
 	});
 };
 
-/**
- * Ensure we are at state branch head
- */
 const ensureStateBranchCheckedOut = async ({
 	stateBranchRoot,
 	stateBranchName,
@@ -346,6 +372,15 @@ const ensureStateBranchCheckedOut = async ({
 
 	if (currentBranchResult.value === stateBranchName) {
 		return succeeded('State branch already checked out', false);
+	}
+
+	const abortRebaseResult = await execGitAllowFail({
+		cwd: stateBranchRoot,
+		args: ['rebase', '--abort'],
+	});
+
+	if (abortRebaseResult.exitCode === 0) {
+		logger.info('Aborted stale state branch rebase');
 	}
 
 	const checkoutResult = await git.checkout({
@@ -438,7 +473,6 @@ export const stageStateBranchOwnEventFile = async ({
 	const eventPath = getRelativeEventFilePath(eventFileName);
 	const eventAbsolutePath = path.join(stateBranchRoot, eventPath);
 
-	// Nothing to stage if file doesn't exist
 	if (!fs.existsSync(eventAbsolutePath)) {
 		return succeeded('No event file to stage', undefined);
 	}
@@ -524,13 +558,17 @@ export const bootstrapStateBranchStorage = async ({
 
 	const steps = [
 		ensureWorktreesDir(),
-		await ensureLocalStateBranch({repoRoot, stateBranchName}),
+		await ensureLocalStateBranch({
+			repoRoot,
+			stateBranchName,
+			preferRemote: !ensureUpstream,
+		}),
 		await ensureStateBranchWorktree({
 			repoRoot,
 			stateBranchRoot,
 			stateBranchName,
 		}),
-		await ensureStateBranchCheckedOut({stateBranchRoot, stateBranchName}), // Mostly redundant, but protects against manual mess ups on the worktree
+		await ensureStateBranchCheckedOut({stateBranchRoot, stateBranchName}),
 		await ensureStateBranchIsStorageOnly(stateBranchRoot),
 		ensureUpstream
 			? await ensureStateBranchTracksRemote({stateBranchRoot, repoRoot})
@@ -545,7 +583,7 @@ export const bootstrapStateBranchStorage = async ({
 	return succeeded(
 		ensureUpstream
 			? 'Bootstrapped state storage'
-			: 'Bootstrapped state storage (readonly)',
+			: 'Bootstrapped state storage readonly',
 		changed,
 	);
 };

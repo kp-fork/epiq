@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {failed, Result, succeeded} from '../model/result-types.js';
+import {failed, isFail, Result, succeeded} from '../model/result-types.js';
+import {getRepoRootDir, getStateBranchRoot} from '../../git/git-storage.js';
 
 export const isLocal = process.env['IS_LOCAL'] === 'true';
 
@@ -9,17 +10,23 @@ export const GLOBAL_CONFIG_DIR_NAME = '.epiq-global';
 export const EVENTS_DIR_NAME = 'events';
 export const PROJECT_FILE_NAME = 'project.json';
 
-export const getExportsDirPath = (root: string): string =>
-	path.join(root, EPIQ_DIR_NAME);
-
 export const getEpiqDirPath = (root: string): string =>
 	path.join(root, EPIQ_DIR_NAME);
 
 export const getProjectFilePath = (root: string): string =>
 	path.join(getEpiqDirPath(root), PROJECT_FILE_NAME);
 
-export const getEventsDirPath = (root: string): string =>
-	path.join(getEpiqDirPath(root), EVENTS_DIR_NAME);
+/**
+ * Authoritative event logs live in the state branch worktree.
+ *
+ * Pass `stateBranchRoot` here for normal app persistence/loading.
+ * Do not pass the user repo root unless explicitly working with legacy cache data.
+ */
+export const getEventsDirPath = (stateRoot: string): string =>
+	path.join(getEpiqDirPath(stateRoot), EVENTS_DIR_NAME);
+
+export const getExportsDirPath = (repoRoot: string): string =>
+	path.join(repoRoot, EPIQ_DIR_NAME);
 
 const hasLocalEpiqDir = (dir: string): boolean => {
 	const candidate = path.join(dir, EPIQ_DIR_NAME);
@@ -33,6 +40,12 @@ export const hasLocalProjectFile = (dir: string): boolean => {
 	return fs.existsSync(candidate) && fs.statSync(candidate).isFile();
 };
 
+/**
+ * Resolves the closest directory containing `.epiq`.
+ *
+ * This remains useful for state branch worktrees and legacy paths, but project
+ * discovery should prefer `resolveClosestEpiqProjectRoot`.
+ */
 export const resolveClosestEpiqRoot = (startDir: string): Result<string> => {
 	let dir = path.resolve(startDir);
 
@@ -69,8 +82,8 @@ export const resolveClosestEpiqProjectRoot = (
 	}
 };
 
-export const ensureEventsDir = (epiqRoot: string): Result<string> => {
-	const eventsPath = getEventsDirPath(epiqRoot);
+export const ensureEventsDir = (stateRoot: string): Result<string> => {
+	const eventsPath = getEventsDirPath(stateRoot);
 
 	try {
 		fs.mkdirSync(eventsPath, {recursive: true});
@@ -82,4 +95,16 @@ export const ensureEventsDir = (epiqRoot: string): Result<string> => {
 				: 'Failed to ensure events dir',
 		);
 	}
+};
+
+export const getPersistRoot = async () => {
+	const repoRootResult = await getRepoRootDir(process.cwd());
+	if (isFail(repoRootResult)) return repoRootResult;
+
+	const stateBranchRootResult = getStateBranchRoot({
+		repoRoot: repoRootResult.value,
+	});
+	if (isFail(stateBranchRootResult)) return stateBranchRootResult;
+
+	return succeeded('Resolved persist root', stateBranchRootResult.value);
 };

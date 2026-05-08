@@ -17,11 +17,16 @@ import {
 } from '../../repository/rank.js';
 import {getCmdState} from '../../state/cmd.state.js';
 import {getRenderedChildren, getState, patchState} from '../../state/state.js';
+import {getPersistRoot} from '../../storage/paths.js';
 
-export const moveCommand = () => {
+export const moveCommand = async () => {
 	const userRes = resolveActorId();
 	if (isFail(userRes)) return failed('Unable to resolve user ID');
 
+	const persistRootResult = await getPersistRoot();
+	if (isFail(persistRootResult)) return persistRootResult;
+
+	const persistRoot = persistRootResult.value;
 	const {modifier} = getCmdState().commandMeta;
 
 	const syncNavigationToPendingMove = (): Result<null> => {
@@ -91,6 +96,7 @@ export const moveCommand = () => {
 			targetNode.id,
 			position,
 			userRes.value,
+			persistRoot,
 		);
 
 		if (isFail(rankResult)) return rankResult;
@@ -116,22 +122,22 @@ export const moveCommand = () => {
 
 	if (modifier === 'next') {
 		patchState({mode: Mode.MOVE});
-		return applyMovePreview(moveChildWithinParent(1));
+		return applyMovePreview(await moveChildWithinParent(1));
 	}
 
 	if (modifier === 'previous') {
 		patchState({mode: Mode.MOVE});
-		return applyMovePreview(moveChildWithinParent(-1));
+		return applyMovePreview(await moveChildWithinParent(-1));
 	}
 
 	if (modifier === 'to-next') {
 		patchState({mode: Mode.MOVE});
-		return applyMovePreview(moveNodeToSiblingContainer(1));
+		return applyMovePreview(await moveNodeToSiblingContainer(1));
 	}
 
 	if (modifier === 'to-previous') {
 		patchState({mode: Mode.MOVE});
-		return applyMovePreview(moveNodeToSiblingContainer(-1));
+		return applyMovePreview(await moveNodeToSiblingContainer(-1));
 	}
 
 	if (modifier === 'confirm') {
@@ -140,7 +146,7 @@ export const moveCommand = () => {
 		const pendingMoveState = getMovePendingState();
 		if (!pendingMoveState) return failed('No pending move to confirm');
 
-		const result = materializeAndPersist(pendingMoveState);
+		const result = materializeAndPersist(pendingMoveState, persistRoot);
 		if (isFail(result)) return result;
 
 		const navResult = syncNavigationToPendingMove();

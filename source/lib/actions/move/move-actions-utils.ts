@@ -17,6 +17,7 @@ import {
 	resolveMoveRank,
 } from '../../repository/rank.js';
 import {getRenderedChildren, getState} from '../../state/state.js';
+import {getPersistRoot} from '../../storage/paths.js';
 
 let pendingMoveState: AppEvent<'move.node'> | null = null;
 
@@ -50,7 +51,7 @@ export const resolveRankForMove = ({
 	return resolveMoveRank(siblings, position);
 };
 
-const createPendingMoveState = ({
+const createPendingMoveState = async ({
 	id,
 	parentId,
 	position = {at: 'end'},
@@ -58,15 +59,20 @@ const createPendingMoveState = ({
 	id: string;
 	parentId: string;
 	position?: MovePosition;
-}): ReturnSuccess<AppEvent<'move.node'>> | ReturnFail => {
+}): Promise<ReturnSuccess<AppEvent<'move.node'>> | ReturnFail> => {
 	const userIdRes = resolveActorId();
 	if (isFail(userIdRes)) return failed('Unable to resolve user ID');
+
+	const persistRootResult = await getPersistRoot();
+	if (isFail(persistRootResult)) return persistRootResult;
+	const persistRoot = persistRootResult.value;
 
 	const rankResult = resolveAndPersistRankForMove(
 		parentId,
 		id,
 		position,
 		userIdRes.value,
+		persistRoot,
 	);
 	if (isFail(rankResult)) return rankResult;
 
@@ -93,7 +99,7 @@ const previewPendingMove = (
 	return succeeded('Node moved successfully', materializedResult.value);
 };
 
-export function moveNodeToSiblingContainer(direction: -1 | 1) {
+export async function moveNodeToSiblingContainer(direction: -1 | 1) {
 	const selectedChildResult = getSelectedChild();
 	if (isFail(selectedChildResult)) return selectedChildResult;
 
@@ -110,7 +116,7 @@ export function moveNodeToSiblingContainer(direction: -1 | 1) {
 	const siblingNode = siblings[currentIndex + direction];
 	if (!siblingNode) return failed('Missing sibling node');
 
-	const pendingResult = createPendingMoveState({
+	const pendingResult = await createPendingMoveState({
 		id: selectedChildResult.value.id,
 		parentId: siblingNode.id,
 		position: {at: 'end'},
@@ -121,7 +127,7 @@ export function moveNodeToSiblingContainer(direction: -1 | 1) {
 	return previewPendingMove(pendingResult.value);
 }
 
-export function moveChildWithinParent(direction: -1 | 1) {
+export async function moveChildWithinParent(direction: -1 | 1) {
 	const selectedChildResult = getSelectedChild();
 	if (isFail(selectedChildResult)) return selectedChildResult;
 
@@ -131,7 +137,7 @@ export function moveChildWithinParent(direction: -1 | 1) {
 	const referenceNode = siblings[selectedIndex + direction];
 	if (!referenceNode) return failed('Missing sibling node');
 
-	const pendingResult = createPendingMoveState({
+	const pendingResult = await createPendingMoveState({
 		id: selectedChildResult.value.id,
 		parentId: currentNode.id,
 		position: {

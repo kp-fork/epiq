@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import {render} from 'ink';
 import meow from 'meow';
 import React from 'react';
-import {syncEpiqFromRemote} from './git/sync.js';
+import {resetHardToRemoteState} from './git/sync.js';
 import EpiqApp from './lib/components/EpiqApp.js';
 import {loadSettingsFromConfig} from './lib/config/user-config.js';
 import {bootStateFromEventLog} from './lib/event/event-boot.js';
@@ -35,7 +35,8 @@ ${chalk.dim('Boot in directory:')}
 
 type BootContext = {
 	hasProject: boolean;
-	epiqRootDir: string | null;
+	repoRoot: string | null;
+	stateBranchRoot: string | null;
 	events: AppEvent[];
 };
 
@@ -55,6 +56,72 @@ const formatUnknownError = (error: unknown): string => {
 	} catch {
 		return String(error);
 	}
+};
+
+const loadSettings = (): Result<boolean> => {
+	const settings = loadSettingsFromConfig();
+
+	if (isFail(settings)) {
+		logger.info(`[boot] settings not loaded: ${settings.message}`);
+		return succeeded('Settings missing or invalid, continuing', false);
+	}
+
+	patchSettingsState(settings.value);
+	return succeeded('Loaded settings', true);
+};
+
+const loadBootContext = (): Result<BootContext> => {
+	const repoRootResult = resolveClosestEpiqProjectRoot(process.cwd());
+
+	if (isFail(repoRootResult)) {
+		return succeeded('No Epiq project found', {
+			hasProject: false,
+			repoRoot: null,
+			stateBranchRoot: null,
+			events: [],
+		});
+	}
+
+	return succeeded('Resolved Epiq project root', {
+		hasProject: true,
+		repoRoot: repoRootResult.value,
+		stateBranchRoot: null,
+		events: [],
+	});
+};
+
+const syncAndLoadProjectEvents = async (
+	bootContext: BootContext,
+): Promise<Result<Pick<BootContext, 'stateBranchRoot' | 'events'>>> => {
+	if (!bootContext.hasProject) {
+		return succeeded('No project found, skipped project event loading', {
+			stateBranchRoot: null,
+			events: [],
+		});
+	}
+
+	if (!bootContext.repoRoot) {
+		return failed('Project root missing from boot context');
+	}
+
+	const syncResult = await resetHardToRemoteState(bootContext.repoRoot);
+	if (isFail(syncResult)) return failed(syncResult.message);
+
+	const {stateBranchRoot} = syncResult.value;
+
+	const eventsResult = loadMergedEvents(stateBranchRoot);
+	if (isFail(eventsResult)) return failed(eventsResult.message);
+
+	logger.info('[boot] loaded events', {
+		root: stateBranchRoot,
+		count: eventsResult.value.length,
+		actions: eventsResult.value.map(event => event.action),
+	});
+
+	return succeeded('Loaded project events from state branch worktree', {
+		stateBranchRoot,
+		events: eventsResult.value,
+	});
 };
 
 const renderNode = (node: React.ReactNode): Result<void> => {
@@ -78,68 +145,6 @@ const renderApp = (): Result<void> => {
 	return renderNode(<EpiqApp width={width} height={height} />);
 };
 
-const loadBootContext = (): Result<BootContext> => {
-	const epiqRootDirResult = resolveClosestEpiqProjectRoot(process.cwd());
-
-	if (isFail(epiqRootDirResult)) {
-		return succeeded('No Epiq project found', {
-			hasProject: false,
-			epiqRootDir: null,
-			events: [],
-		});
-	}
-
-	return succeeded('Resolved Epiq project root', {
-		hasProject: true,
-		epiqRootDir: epiqRootDirResult.value,
-		events: [],
-	});
-};
-
-const loadSettings = (): Result<boolean> => {
-	const settings = loadSettingsFromConfig();
-
-	if (isFail(settings)) {
-		logger.info(`[boot] settings not loaded: ${settings.message}`);
-		return succeeded('Settings missing or invalid, continuing', false);
-	}
-
-	patchSettingsState(settings.value);
-	return succeeded('Loaded settings', true);
-};
-
-const syncAndLoadProjectEvents = async (
-	bootContext: BootContext,
-): Promise<Result<AppEvent[]>> => {
-	if (!bootContext.hasProject) {
-		return succeeded('No project found, skipped project event loading', []);
-	}
-
-	if (!bootContext.epiqRootDir) {
-		return failed('Project root missing from boot context');
-	}
-
-	const syncResult = await syncEpiqFromRemote(bootContext.epiqRootDir);
-
-	if (isFail(syncResult)) {
-		return failed(syncResult.message);
-	}
-
-	const eventsResult = loadMergedEvents(bootContext.epiqRootDir);
-
-	if (isFail(eventsResult)) {
-		return failed(eventsResult.message);
-	}
-
-	logger.info('[boot] loaded events', {
-		root: bootContext.epiqRootDir,
-		count: eventsResult.value.length,
-		actions: eventsResult.value.map(event => event.action),
-	});
-
-	return succeeded('Loaded project events', eventsResult.value);
-};
-
 async function bootApp(): Promise<Result<void>> {
 	try {
 		const settingsResult = loadSettings();
@@ -155,7 +160,8 @@ async function bootApp(): Promise<Result<void>> {
 		const eventsResult = await syncAndLoadProjectEvents(bootContext);
 		if (isFail(eventsResult)) return failAt(3, eventsResult.message);
 
-		bootContext.events = eventsResult.value;
+		bootContext.stateBranchRoot = eventsResult.value.stateBranchRoot;
+		bootContext.events = eventsResult.value.events;
 
 		const bootStateResult = bootStateFromEventLog({
 			hasProject: bootContext.hasProject,
