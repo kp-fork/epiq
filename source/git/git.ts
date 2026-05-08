@@ -114,11 +114,9 @@ export const createStateBranch = async ({
 const ensureLocalStateBranch = async ({
 	repoRoot,
 	stateBranchName,
-	preferRemote,
 }: {
 	repoRoot: string;
 	stateBranchName: string;
-	preferRemote: boolean;
 }): Promise<Result<boolean>> => {
 	const remoteResult = await hasRemote({repoRoot});
 	if (isFail(remoteResult)) {
@@ -163,26 +161,6 @@ const ensureLocalStateBranch = async ({
 	}
 
 	if (localResult.value) {
-		if (preferRemote && hasRemoteStateBranch) {
-			const resetRefResult = await execGit({
-				cwd: repoRoot,
-				args: [
-					'branch',
-					'--force',
-					stateBranchName,
-					`${ORIGIN}/${stateBranchName}`,
-				],
-			});
-
-			if (isFail(resetRefResult)) {
-				return failed(
-					`Failed to reset local ${stateBranchName} from remote\n${resetRefResult.message}`,
-				);
-			}
-
-			return succeeded('Reset local state branch from remote', true);
-		}
-
 		return succeeded('Local state branch already exists', false);
 	}
 
@@ -561,7 +539,6 @@ export const bootstrapStateBranchStorage = async ({
 		await ensureLocalStateBranch({
 			repoRoot,
 			stateBranchName,
-			preferRemote: !ensureUpstream,
 		}),
 		await ensureStateBranchWorktree({
 			repoRoot,
