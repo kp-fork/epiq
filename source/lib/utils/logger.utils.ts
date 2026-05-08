@@ -1,4 +1,4 @@
-import {failed, Result} from '../model/result-types.js';
+import {failed, isFail, Result} from '../model/result-types.js';
 
 export const failAt = (step: number, message: string): Result<never> => {
 	logger.error(`[boot:${step}] ${message}`);
@@ -14,4 +14,9 @@ export const formatUnknownError = (error: unknown): string => {
 	} catch {
 		return String(error);
 	}
+};
+
+export const trace = <T>(label: string, result: Result<T>): Result<T> => {
+	if (isFail(result)) logger.info(`[${label}]:failed`, result.message);
+	return result;
 };

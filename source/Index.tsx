@@ -19,7 +19,7 @@ import {
 import {patchSettingsState} from './lib/state/settings.state.js';
 import {patchState} from './lib/state/state.js';
 import {resolveClosestEpiqProjectRoot} from './lib/storage/paths.js';
-import {failAt, formatUnknownError} from './lib/utils/log.utils.js';
+import {failAt, formatUnknownError} from './lib/utils/logger.utils.js';
 import './logger.js';
 
 meow(
