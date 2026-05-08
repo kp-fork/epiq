@@ -54,11 +54,7 @@ export const resetHardToRemoteState = async (
 
 	const stateBranch = stateBranchResult.value;
 
-	logger.info('[sync] resetting state branch worktree from remote', {
-		repoRoot,
-		stateBranchRoot,
-		stateBranch,
-	});
+	logger.info('[sync] resetting state branch worktree from remote');
 
 	const resetResult = await resetBranchHardToRemote({
 		cwd: stateBranchRoot,
@@ -410,16 +406,13 @@ export const syncAndReloadState = async () => {
 		return failed(`Unable to load events. ${allLoadedEventsResult.message}`);
 	}
 
-	const bootResult = bootStateFromEventLog({
-		eventLog: allLoadedEventsResult.value,
-		hasProject: true,
-	});
+	const bootResult = bootStateFromEventLog(allLoadedEventsResult.value);
 	if (isFail(bootResult)) {
 		return failed(`Unable to boot synced state. ${bootResult.message}`);
 	}
 
 	patchState({
-		hasProject: true,
+		hasProjectDefinition: true,
 		syncStatus: {
 			msg: 'Synced',
 			status: 'synced',

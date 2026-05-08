@@ -82,10 +82,7 @@ const boot = async (repoRoot?: string): Promise<Result<BootResult>> => {
 	const eventsResult = loadMergedEvents(stateBranchRoot);
 	if (isFail(eventsResult)) return failed(eventsResult.message);
 
-	const bootResult = bootStateFromEventLog({
-		eventLog: eventsResult.value,
-		hasProject: true,
-	});
+	const bootResult = bootStateFromEventLog(eventsResult.value);
 	if (isFail(bootResult)) return failed(bootResult.message);
 
 	return succeeded('Booted Epiq state', {

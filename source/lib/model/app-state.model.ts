@@ -39,7 +39,9 @@ export type SyncStatus = {
 };
 
 export type AppState = {
-	hasProject: boolean;
+	hasInitializingEvents: boolean;
+	hasProjectDefinition: boolean;
+
 	readOnly: boolean;
 	selectedIndex: number;
 	selectedNode: NavNode<AnyContext> | null;

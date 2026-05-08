@@ -203,14 +203,8 @@ export function createDefaultEvents({
 	] as const satisfies readonly AppEvent[]);
 }
 
-export function bootStateFromEventLog({
-	hasProject,
-	eventLog,
-}: {
-	hasProject: boolean;
-	eventLog: AppEvent[];
-}): Result {
-	if (!hasProject) {
+export function bootStateFromEventLog(eventLog: AppEvent[]): Result {
+	if (!eventLog.length) {
 		const workspace = nodes.workspace(
 			'temporary-uninitialized-workspace',
 			'Workspace',
@@ -221,7 +215,7 @@ export function bootStateFromEventLog({
 		if (isFail(initResult)) return initResult;
 
 		patchState({
-			hasProject: false,
+			hasProjectDefinition: false,
 			mode: Mode.DEFAULT,
 		});
 
@@ -243,7 +237,7 @@ export function bootStateFromEventLog({
 	navigateToInitialNode();
 
 	patchState({
-		hasProject: true,
+		hasProjectDefinition: true,
 	});
 
 	return succeeded('State booted successfully', null);

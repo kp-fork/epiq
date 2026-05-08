@@ -119,13 +119,13 @@ export function initWorkspaceState(workspace: Workspace) {
 	_initialWorkspace = workspace;
 	const repoRootResult = resolveClosestEpiqProjectRoot(process.cwd());
 
-	let hasProject = false;
+	let hasProjectDefinition = false;
 
 	if (!isFail(repoRootResult)) {
 		const projectResult = readProjectFile(repoRootResult.value);
 		if (isFail(projectResult)) return failed(projectResult.message);
 
-		hasProject = true;
+		hasProjectDefinition = true;
 	}
 
 	const base: BaseState = {
@@ -146,7 +146,8 @@ export function initWorkspaceState(workspace: Workspace) {
 		eventLog: [],
 		unappliedEvents: [],
 		timeMode: 'live',
-		hasProject: hasProject,
+		hasProjectDefinition,
+		hasInitializingEvents: false,
 	};
 
 	const deriveResult = derive(base);

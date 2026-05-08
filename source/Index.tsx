@@ -9,10 +9,17 @@ import {bootStateFromEventLog} from './lib/event/event-boot.js';
 import {loadMergedEvents} from './lib/event/event-load.js';
 import {AppEvent} from './lib/event/event.model.js';
 import {initListeners} from './lib/listeners/keypress-listener.js';
-import {failed, isFail, Result, succeeded} from './lib/model/result-types.js';
+import {
+	failed,
+	isFail,
+	isSuccess,
+	Result,
+	succeeded,
+} from './lib/model/result-types.js';
 import {patchSettingsState} from './lib/state/settings.state.js';
-import {getSafeState, patchState} from './lib/state/state.js';
+import {patchState} from './lib/state/state.js';
 import {resolveClosestEpiqProjectRoot} from './lib/storage/paths.js';
+import {failAt, formatUnknownError} from './lib/utils/log.utils.js';
 import './logger.js';
 
 meow(
@@ -33,96 +40,9 @@ ${chalk.dim('Boot in directory:')}
 	},
 );
 
-type BootContext = {
-	hasProject: boolean;
-	repoRoot: string | null;
-	stateBranchRoot: string | null;
-	events: AppEvent[];
-};
-
 let width = process.stdout.columns || 120;
 let height = process.stdout.rows || 20;
 let ink: ReturnType<typeof render> | null = null;
-
-const failAt = (step: number, message: string): Result<never> =>
-	failed(`[boot:${step}] ${message}`);
-
-const formatUnknownError = (error: unknown): string => {
-	if (error instanceof Error) return error.message;
-	if (typeof error === 'string') return error;
-
-	try {
-		return JSON.stringify(error, null, 2);
-	} catch {
-		return String(error);
-	}
-};
-
-const loadSettings = (): Result<boolean> => {
-	const settings = loadSettingsFromConfig();
-
-	if (isFail(settings)) {
-		logger.info(`[boot] settings not loaded: ${settings.message}`);
-		return succeeded('Settings missing or invalid, continuing', false);
-	}
-
-	patchSettingsState(settings.value);
-	return succeeded('Loaded settings', true);
-};
-
-const loadBootContext = (): Result<BootContext> => {
-	const repoRootResult = resolveClosestEpiqProjectRoot(process.cwd());
-
-	if (isFail(repoRootResult)) {
-		return succeeded('No Epiq project found', {
-			hasProject: false,
-			repoRoot: null,
-			stateBranchRoot: null,
-			events: [],
-		});
-	}
-
-	return succeeded('Resolved Epiq project root', {
-		hasProject: true,
-		repoRoot: repoRootResult.value,
-		stateBranchRoot: null,
-		events: [],
-	});
-};
-
-const syncAndLoadProjectEvents = async (
-	bootContext: BootContext,
-): Promise<Result<Pick<BootContext, 'stateBranchRoot' | 'events'>>> => {
-	if (!bootContext.hasProject) {
-		return succeeded('No project found, skipped project event loading', {
-			stateBranchRoot: null,
-			events: [],
-		});
-	}
-
-	if (!bootContext.repoRoot) {
-		return failed('Project root missing from boot context');
-	}
-
-	const syncResult = await resetHardToRemoteState(bootContext.repoRoot);
-	if (isFail(syncResult)) return failed(syncResult.message);
-
-	const {stateBranchRoot} = syncResult.value;
-
-	const eventsResult = loadMergedEvents(stateBranchRoot);
-	if (isFail(eventsResult)) return failed(eventsResult.message);
-
-	logger.info('[boot] loaded events', {
-		root: stateBranchRoot,
-		count: eventsResult.value.length,
-		actions: eventsResult.value.map(event => event.action),
-	});
-
-	return succeeded('Loaded project events from state branch worktree', {
-		stateBranchRoot,
-		events: eventsResult.value,
-	});
-};
 
 const renderNode = (node: React.ReactNode): Result<void> => {
 	try {
@@ -138,45 +58,42 @@ const renderNode = (node: React.ReactNode): Result<void> => {
 	}
 };
 
-const renderApp = (): Result<void> => {
-	const stateResult = getSafeState();
-	if (isFail(stateResult)) return failed(stateResult.message);
-
-	return renderNode(<EpiqApp width={width} height={height} />);
-};
+const renderApp = (): Result<void> =>
+	renderNode(<EpiqApp width={width} height={height} />);
 
 async function bootApp(): Promise<Result<void>> {
 	try {
-		const settingsResult = loadSettings();
-		if (isFail(settingsResult)) return failAt(1, settingsResult.message);
+		// 1. Get settings
+		const settings = loadSettingsFromConfig();
+		if (isSuccess(settings)) patchSettingsState(settings.value);
 
-		const bootContextResult = loadBootContext();
-		if (isFail(bootContextResult)) {
-			return failAt(2, bootContextResult.message);
+		// 2. Locate repo root
+		const repoRootResult = resolveClosestEpiqProjectRoot(process.cwd());
+
+		let eventLog: AppEvent[] = [];
+		if (isSuccess(repoRootResult)) {
+			// 3.a Sync with remote state
+			const repoRoot = repoRootResult.value;
+			const syncResult = await resetHardToRemoteState(repoRoot);
+			if (isFail(syncResult)) return failAt(3, syncResult.message);
+
+			// 3.b Load events
+			const eventsResult = loadMergedEvents(syncResult.value.stateBranchRoot);
+			if (isFail(eventsResult)) return failAt(3, eventsResult.message);
+			eventLog = eventsResult.value;
 		}
 
-		const bootContext = bootContextResult.value;
+		// 4. Boot state from events
+		const bootStateResult = bootStateFromEventLog(eventLog);
+		if (isFail(bootStateResult)) return failAt(4, bootStateResult.message);
 
-		const eventsResult = await syncAndLoadProjectEvents(bootContext);
-		if (isFail(eventsResult)) return failAt(3, eventsResult.message);
-
-		bootContext.stateBranchRoot = eventsResult.value.stateBranchRoot;
-		bootContext.events = eventsResult.value.events;
-
-		const bootStateResult = bootStateFromEventLog({
-			hasProject: bootContext.hasProject,
-			eventLog: bootContext.events,
+		// 5. Set state
+		patchState({
+			hasProjectDefinition: isSuccess(repoRootResult),
+			hasInitializingEvents: Boolean(eventLog.length),
 		});
 
-		if (isFail(bootStateResult)) {
-			return failAt(4, bootStateResult.message);
-		}
-
-		const stateResult = getSafeState();
-		if (isFail(stateResult)) return failAt(5, stateResult.message);
-
-		patchState({hasProject: bootContext.hasProject});
-
+		// 6. Render app
 		const renderResult = renderApp();
 		if (isFail(renderResult)) return failAt(6, renderResult.message);
 
@@ -194,16 +111,9 @@ process.stdout.on('resize', () => {
 
 	if (!ink) return;
 
-	const stateResult = getSafeState();
-	if (isFail(stateResult)) {
-		logger.info(`[boot:resize] ${stateResult.message}`);
-		return;
-	}
-
 	const renderResult = renderApp();
-	if (isFail(renderResult)) {
+	if (isFail(renderResult))
 		logger.info(`[boot:resize] ${renderResult.message}`);
-	}
 });
 
 void (async () => {

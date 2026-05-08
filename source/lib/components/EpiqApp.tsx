@@ -49,7 +49,7 @@ export default function EpiqApp({width, height}: EpiqAppProps) {
 	const {isSetupDone} = getUserSetupStatus();
 
 	const isSetupMode = !isSetupDone;
-	const isUninitializedRepo = isSetupDone && !state.hasProject;
+	const isUninitializedRepo = isSetupDone && !state.hasProjectDefinition;
 
 	if (isSetupMode) {
 		return (

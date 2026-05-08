@@ -258,7 +258,7 @@ export const initCommand = async () => {
 	});
 
 	patchState({
-		hasProject: true,
+		hasProjectDefinition: true,
 		mode: Mode.DEFAULT,
 	});
 
