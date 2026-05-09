@@ -1,4 +1,6 @@
+import {isFieldNode} from '../../model/context.model.js';
 import {failed, Result, succeeded} from '../../model/result-types.js';
+import {getOrderedChildren} from '../../repository/rank.js';
 import {getRenderedChildren, getState} from '../../state/state.js';
 import {navigationUtils} from './navigation-action-utils.js';
 
@@ -9,93 +11,157 @@ type NavigationAnchor = {
 	selectedIndex: number;
 };
 
+const clampIndex = (index: number, length: number): number => {
+	if (length <= 0) return -1;
+	return Math.max(0, Math.min(index, length - 1));
+};
+
 export const captureNavigationAnchor = (): NavigationAnchor => {
-	const {currentNode, selectedIndex} = getState();
-	const selectedNode = getRenderedChildren(currentNode.id)[selectedIndex];
+	const {currentNode, selectedIndex, selectedNode} = getState();
 
 	return {
 		currentNodeId: currentNode.id,
 		selectedNodeId: selectedNode?.id ?? null,
-		parentNodeId: selectedNode?.parentNodeId ?? null,
+		parentNodeId: currentNode.id,
 		selectedIndex,
 	};
 };
 
-const clampIndex = (index: number, length: number): number =>
-	Math.max(0, Math.min(index, Math.max(0, length - 1)));
+const isEnteredTextContainer = (nodeId: string): boolean => {
+	const node = getState().nodes[nodeId];
+
+	return (
+		!!node &&
+		!node.isDeleted &&
+		isFieldNode(node) &&
+		node.childRenderAxis === 'vertical'
+	);
+};
+
+const tryNavigateIntoNode = (
+	nodeId: string,
+	selectedIndex: number,
+): boolean => {
+	const {nodes} = getState();
+	const node = nodes[nodeId];
+
+	if (!node || node.isDeleted) return false;
+
+	const children = getRenderedChildren(node.id);
+
+	navigationUtils.navigate({
+		currentNode: node,
+		selectedIndex: clampIndex(selectedIndex, children.length),
+	});
+
+	return true;
+};
+
+const tryNavigateToNode = (nodeId: string): boolean => {
+	const {nodes} = getState();
+	const selectedNode = nodes[nodeId];
+
+	if (!selectedNode || selectedNode.isDeleted) return false;
+
+	const parentId = selectedNode.parentNodeId;
+
+	if (!parentId) {
+		return tryNavigateIntoNode(selectedNode.id, 0);
+	}
+
+	const parent = nodes[parentId];
+	if (!parent || parent.isDeleted) return false;
+
+	const siblings = getOrderedChildren(parent.id);
+	const selectedIndex = siblings.findIndex(
+		child => child.id === selectedNode.id,
+	);
+
+	if (selectedIndex >= 0) {
+		navigationUtils.navigate({
+			currentNode: parent,
+			selectedIndex,
+		});
+
+		return true;
+	}
+
+	return tryNavigateToNode(parent.id);
+};
+
+const tryNavigateToNodeOrAncestor = (nodeId: string): boolean => {
+	const {nodes} = getState();
+
+	let currentId: string | null | undefined = nodeId;
+	const visited = new Set<string>();
+
+	while (currentId && !visited.has(currentId)) {
+		visited.add(currentId);
+
+		if (tryNavigateToNode(currentId)) return true;
+
+		currentId = nodes[currentId]?.parentNodeId;
+	}
+
+	return false;
+};
+
+const isLiveNode = (nodeId: string | null): boolean => {
+	if (!nodeId) return false;
+
+	const node = getState().nodes[nodeId];
+	return !!node && !node.isDeleted;
+};
+
 export const restoreNavigationAnchor = (
 	anchor: NavigationAnchor,
 ): Result<null> => {
-	const {nodes} = getState();
-	const currentNode = nodes[anchor.currentNodeId];
+	const {nodes, rootNodeId} = getState();
 
-	// 1. Same container + same selected node.
-	if (currentNode && !currentNode.isDeleted && anchor.selectedNodeId) {
-		const children = getRenderedChildren(currentNode.id);
-		const selectedIndex = children.findIndex(
-			child => child.id === anchor.selectedNodeId,
-		);
-
-		if (selectedIndex >= 0) {
-			navigationUtils.navigate({currentNode, selectedIndex});
-			return succeeded('Restored navigation', null);
-		}
+	if (
+		isEnteredTextContainer(anchor.currentNodeId) &&
+		tryNavigateIntoNode(anchor.currentNodeId, anchor.selectedIndex)
+	) {
+		return succeeded('Restored navigation inside text container', null);
 	}
 
-	// 2. Selected node still exists, but moved to another parent.
-	if (anchor.selectedNodeId) {
-		const selectedNode = nodes[anchor.selectedNodeId];
-
-		if (selectedNode && !selectedNode.isDeleted && selectedNode.parentNodeId) {
-			const parent = nodes[selectedNode.parentNodeId];
-
-			if (parent && !parent.isDeleted) {
-				const selectedIndex = getRenderedChildren(parent.id).findIndex(
-					child => child.id === selectedNode.id,
-				);
-
-				if (selectedIndex >= 0) {
-					navigationUtils.navigate({currentNode: parent, selectedIndex});
-					return succeeded('Restored navigation to moved node', null);
-				}
-			}
-		}
+	if (
+		isLiveNode(anchor.selectedNodeId) &&
+		anchor.selectedNodeId &&
+		tryNavigateToNodeOrAncestor(anchor.selectedNodeId)
+	) {
+		return succeeded('Restored navigation to selected node or ancestor', null);
 	}
 
-	// 3. Same container still exists; use closest old index.
-	if (currentNode && !currentNode.isDeleted) {
-		const children = getRenderedChildren(currentNode.id);
-
-		navigationUtils.navigate({
-			currentNode,
-			selectedIndex: clampIndex(anchor.selectedIndex, children.length),
-		});
-
+	if (tryNavigateIntoNode(anchor.currentNodeId, anchor.selectedIndex)) {
 		return succeeded('Restored navigation to previous container', null);
 	}
 
-	// 4. Old selected parent still exists.
-	if (anchor.parentNodeId) {
-		const parent = nodes[anchor.parentNodeId];
-
-		if (parent && !parent.isDeleted) {
-			const children = getRenderedChildren(parent.id);
-
-			navigationUtils.navigate({
-				currentNode: parent,
-				selectedIndex: clampIndex(anchor.selectedIndex, children.length),
-			});
-
-			return succeeded('Restored navigation to parent', null);
-		}
+	if (
+		anchor.parentNodeId &&
+		tryNavigateIntoNode(anchor.parentNodeId, anchor.selectedIndex)
+	) {
+		return succeeded('Restored navigation to previous parent', null);
 	}
 
-	const root = nodes[getState().rootNodeId];
-	if (!root || root.isDeleted) return failed('Unable to restore navigation');
+	if (tryNavigateToNodeOrAncestor(anchor.currentNodeId)) {
+		return succeeded(
+			'Restored navigation to previous container or ancestor',
+			null,
+		);
+	}
+
+	const root = nodes[rootNodeId];
+
+	if (!root || root.isDeleted) {
+		return failed('Unable to restore navigation');
+	}
+
+	const rootChildren = getRenderedChildren(root.id);
 
 	navigationUtils.navigate({
 		currentNode: root,
-		selectedIndex: 0,
+		selectedIndex: clampIndex(anchor.selectedIndex, rootChildren.length),
 	});
 
 	return succeeded('Restored navigation to root', null);
