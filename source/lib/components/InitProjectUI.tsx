@@ -32,10 +32,10 @@ export const InitProjectUI: React.FC<InitProjectUIProps> = ({
 			)} project yet.`}</Text>
 
 			<Text color={theme.primary}>
-				To start tracking issues here, we need to initialize a new{' '}
+				To start tracking issues here, we need to initialize a new
 				<Text color={theme.primary} backgroundColor={theme.secondary}>
 					{' .epiq/project.json '}
-				</Text>{' '}
+				</Text>
 				file in this repository.
 			</Text>
 
@@ -48,8 +48,9 @@ export const InitProjectUI: React.FC<InitProjectUIProps> = ({
 			</Box>
 
 			<Box marginTop={1}>
-				<Text color={theme.secondary2}>
-					(This will create the local epiq project files)
+				<Text color={theme.secondary2}>This will create, commit and push </Text>
+				<Text color={theme.primary} backgroundColor={theme.secondary}>
+					{' .epiq/project.json '}
 				</Text>
 			</Box>
 		</Box>

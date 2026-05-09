@@ -36,6 +36,7 @@ describe('resolveAndPersistRankForMove', () => {
 	it('rebalances exhausted sibling ranks and retries rank resolution', async () => {
 		const left = '000000000000000000000001';
 		const right = '000000000000000000000002';
+		const stateBranchRoot = '/state';
 
 		expect(isFail(rankBetween(left, right))).toBe(true);
 
@@ -79,6 +80,7 @@ describe('resolveAndPersistRankForMove', () => {
 				userId: 'user-1',
 				userName: 'Test User',
 			},
+			stateBranchRoot,
 		);
 
 		expect(isFail(result)).toBe(false);
@@ -92,6 +94,12 @@ describe('resolveAndPersistRankForMove', () => {
 		}
 
 		expect(materializeAndPersist).toHaveBeenCalledTimes(1);
+		expect(materializeAndPersist).toHaveBeenCalledWith(
+			expect.objectContaining({
+				action: 'rebalance.children',
+			}),
+			stateBranchRoot,
+		);
 	});
 });
 

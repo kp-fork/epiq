@@ -1,5 +1,5 @@
+import {isFail, isSuccess} from '../model/result-types.js';
 import {readProjectFile} from '../project-setup/project-setup.js';
-import {failed, isFail, isSuccess} from '../model/result-types.js';
 import {getSettingsState} from '../state/settings.state.js';
 import {resolveClosestEpiqProjectRoot} from '../storage/paths.js';
 
@@ -29,8 +29,8 @@ export const getUserSetupStatus = (): {
 };
 export const isRepositoryInitialized = () => {
 	const repoRootResult = resolveClosestEpiqProjectRoot(process.cwd());
-	if (isFail(repoRootResult))
-		return failed('Unable to determine if repository is initialized');
+	if (isFail(repoRootResult)) return false;
+
 	const projectFileResult = readProjectFile(repoRootResult.value);
 
 	return isSuccess(projectFileResult);

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {execGit} from '../git/git-utils.js';
-import {syncEpiqFromRemote, syncEpiqWithRemote} from '../git/sync.js';
+import {resetHardToRemoteState, syncEpiqWithRemote} from '../git/sync.js';
 import {isFail} from '../lib/model/result-types.js';
 
 const writeProjectFile = (repoRoot: string): void => {
@@ -276,7 +276,7 @@ describe('sync', () => {
 		});
 		if (isFail(syncWriteResult)) throw new Error(syncWriteResult.message);
 
-		const syncReadResult = await syncEpiqFromRemote(repoB);
+		const syncReadResult = await resetHardToRemoteState(repoB);
 		if (isFail(syncReadResult)) throw new Error(syncReadResult.message);
 
 		const hydratedFile = getEventsFile({

@@ -2,20 +2,12 @@ import {ulid} from 'ulid';
 import {exportBoardLayout} from '../../export/export.js';
 import {navigationUtils} from '../actions/default/navigation-action-utils.js';
 import {setConfig} from '../config/user-config.js';
-import {createIssueEvents} from '../event/common-events.js';
-import {getEventTime} from '../event/date-utils.js';
-import {loadMergedEvents, splitEventsAtTime} from '../event/event-load.js';
-import {
-	materializeAndPersist,
-	materializeAndPersistAll,
-} from '../event/event-materialize-and-persist.js';
-import {materializeAll} from '../event/event-materialize.js';
+import {persistEvent} from '../event/event-materialize-and-persist.js';
 import {resolveActorId} from '../event/event-persist.js';
-import {AppEvent} from '../event/event.model.js';
 import {resolveReopenParentFromLog} from '../event/log-utils.js';
 import {CLOSED_SWIMLANE_ID} from '../event/static-ids.js';
 import {CommandLineActionEntry, Mode} from '../model/action-map.model.js';
-import {Filter, findInBreadCrumb} from '../model/app-state.model.js';
+import {Filter} from '../model/app-state.model.js';
 import {isTicketNode} from '../model/context.model.js';
 import {failed, isFail, succeeded} from '../model/result-types.js';
 import {findAncestor, nodeRepo} from '../repository/node-repo.js';
@@ -29,12 +21,11 @@ import {
 	getRenderedChildren,
 	getState,
 	patchState,
-	resetState,
 	updateState,
 } from '../state/state.js';
-import {resolveClosestEpiqRoot} from '../storage/paths.js';
+import {getPersistRoot} from '../storage/paths.js';
 import {CmdKeywords} from './cmd-keywords.js';
-import {CmdIntent} from './command-meta.js';
+import {CmdIntent} from './command-intent.js';
 import {
 	ConfigModifiers,
 	EditModifiers,
@@ -43,10 +34,11 @@ import {
 import {editCommand} from './commands/edit.cmd.js';
 import {initCommand} from './commands/init.cmd.js';
 import {moveCommand} from './commands/move.cmd.js';
+import {newCommand} from './commands/new.cmd.js';
+import {peekCommand} from './commands/peek.cmd.js';
 import {setAutoSyncDurationCommand} from './commands/set-auto-sync-duration.cmd.js';
 import {setAutoSyncCommand} from './commands/set-auto-sync.cmd.js';
 import {syncCommand} from './commands/sync.cmd.js';
-import {parsePeekDateInput} from './validate-date.js';
 
 const findTagByName = (name: string) =>
 	Object.values(getState().tags).find(tag => tag.name === name);
@@ -60,13 +52,15 @@ export const commands: CommandLineActionEntry[] = [
 	{
 		systemOnly: true,
 		intent: CmdIntent.Move,
+		description: 'Internal move-state command',
 		mode: Mode.COMMAND_LINE,
 		action: moveCommand,
 	},
 	{
 		intent: CmdIntent.Delete,
+		description: 'Delete the currently selected node',
 		mode: Mode.COMMAND_LINE,
-		action: () => {
+		action: async () => {
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
@@ -74,7 +68,7 @@ export const commands: CommandLineActionEntry[] = [
 			const child = getRenderedChildren(currentNode.id)[selectedIndex];
 			if (!child) return failed('Unable to resolve child to delete');
 
-			return materializeAndPersist({
+			return persistEvent({
 				id: ulid(),
 				action: 'delete.node',
 				payload: {
@@ -87,18 +81,20 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Filter,
+		description: 'Filter the board, for example `:filter tag urgent`',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			const {modifier, inputString} = getCmdState().commandMeta;
 			const regex = /(!=|=)/;
-			const [filterTarget, _filterOperator] = modifier.split(regex);
+			const [filterTarget] = modifier.split(regex);
 			const isValidModifier = (val: string): val is Filter['target'] =>
 				getCmdModifiers(CmdKeywords.FILTER)
 					.map(x => x.split(regex)[0])
 					.includes(val);
 
-			if (!filterTarget || !isValidModifier(filterTarget))
+			if (!filterTarget || !isValidModifier(filterTarget)) {
 				return failed('Invalid filter modifier');
+			}
 
 			const filter: Filter = {
 				target: filterTarget,
@@ -112,11 +108,12 @@ export const commands: CommandLineActionEntry[] = [
 				mode: Mode.DEFAULT,
 			}));
 
-			return succeeded('Viewing help', null);
+			return succeeded('Filter updated', null);
 		},
 	},
 	{
 		intent: CmdIntent.ViewHelp,
+		description: 'Open the help screen',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
 			patchState({mode: Mode.HELP});
@@ -125,8 +122,9 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.CloseIssue,
+		description: 'Move the selected issue to the closed swimlane',
 		mode: Mode.COMMAND_LINE,
-		action: () => {
+		action: async () => {
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
@@ -143,17 +141,20 @@ export const commands: CommandLineActionEntry[] = [
 				return failed('Issue is already closed');
 			}
 
+			const persistRootResult = await getPersistRoot();
+			if (isFail(persistRootResult)) return persistRootResult;
+			const persistRoot = persistRootResult.value;
+
 			const rankResult = resolveAndPersistRankForMove(
 				closeSwimlane.id,
 				target.id,
-				{
-					at: 'end',
-				},
+				{at: 'end'},
 				userRes.value,
+				persistRoot,
 			);
 			if (isFail(rankResult)) return rankResult;
 
-			const result = materializeAndPersist({
+			const result = await persistEvent({
 				id: ulid(),
 				action: 'close.issue',
 				payload: {
@@ -172,8 +173,9 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.ReopenIssue,
+		description: 'Move a closed issue back to its previous swimlane',
 		mode: Mode.COMMAND_LINE,
-		action: () => {
+		action: async () => {
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
@@ -199,6 +201,7 @@ export const commands: CommandLineActionEntry[] = [
 			if (ticket.parentNodeId !== closeSwimlane.id) {
 				return failed('Issue is not closed');
 			}
+
 			if (!isTicketNode(ticket)) return failed('Target node is not issue');
 
 			const previousParentId = resolveReopenParentFromLog(ticket);
@@ -213,17 +216,20 @@ export const commands: CommandLineActionEntry[] = [
 			const previousParent = getState().nodes[previousParentId];
 			if (!previousParent) return failed('Previous parent no longer exists');
 
+			const persistRootResult = await getPersistRoot();
+			if (isFail(persistRootResult)) return persistRootResult;
+			const persistRoot = persistRootResult.value;
+
 			const rankResult = resolveAndPersistRankForMove(
 				previousParent.id,
 				ticket.id,
-				{
-					at: 'end',
-				},
+				{at: 'end'},
 				userRes.value,
+				persistRoot,
 			);
 			if (isFail(rankResult)) return rankResult;
 
-			const result = materializeAndPersist({
+			const result = await persistEvent({
 				id: ulid(),
 				action: 'reopen.issue',
 				payload: {
@@ -242,175 +248,22 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Init,
+		description: 'Initialize Epiq in the current git repository',
 		mode: Mode.COMMAND_LINE,
 		action: initCommand,
 	},
 	{
 		intent: CmdIntent.NewItem,
+		description: 'Create a new board, swimlane, or issue',
 		mode: Mode.COMMAND_LINE,
-		action: (_cmdAction, cmdState) => {
-			const userRes = resolveActorId();
-			if (isFail(userRes)) return failed('Unable to resolve user ID');
-
-			if (!cmdState.inputString) {
-				return failed(`provide a name for your ${cmdState.modifier}`);
-			}
-
-			const {breadCrumb, currentNode, selectedIndex} = getState();
-
-			const createAndNavigate = (
-				event: AppEvent<
-					| 'add.workspace'
-					| 'add.board'
-					| 'add.swimlane'
-					| 'add.issue'
-					| 'add.field'
-				>,
-			) => {
-				const result = materializeAndPersist(event);
-				if (isFail(result)) return result;
-
-				const createdNode = nodeRepo.getNode(result.value.result.id);
-				if (!createdNode) return failed('Created node not found');
-
-				if (!createdNode.parentNodeId) return result;
-
-				const parentNode = nodeRepo.getNode(createdNode.parentNodeId);
-				if (!parentNode) return failed('Parent node not found');
-
-				navigationUtils.navigate({
-					currentNode: parentNode,
-					selectedIndex: nodeRepo
-						.getSiblings(createdNode.parentNodeId)
-						.findIndex(({id}) => id === createdNode.id),
-				});
-
-				return result;
-			};
-
-			if (cmdState.modifier === 'board') {
-				const {rootNodeId} = getState();
-				const workspace = nodeRepo.getNode<'WORKSPACE'>(rootNodeId);
-				if (!workspace) return failed('Workspace not found');
-
-				const rankResult = resolveAndPersistRankForCreate(
-					workspace.id,
-					userRes.value,
-				);
-				if (isFail(rankResult)) return rankResult;
-
-				return createAndNavigate({
-					id: ulid(),
-					action: 'add.board',
-					payload: {
-						id: ulid(),
-						name: cmdState.inputString,
-						parent: workspace.id,
-						rank: rankResult.value,
-					},
-					...userRes.value,
-				});
-			}
-
-			if (cmdState.modifier === 'swimlane') {
-				const boardResult = findInBreadCrumb(breadCrumb, 'BOARD');
-				if (isFail(boardResult))
-					return failed('Unable to add swimlane in this context');
-
-				const rankResult = resolveAndPersistRankForCreate(
-					boardResult.value.id,
-					userRes.value,
-				);
-				if (isFail(rankResult)) return rankResult;
-
-				return createAndNavigate({
-					id: ulid(),
-					action: 'add.swimlane',
-					payload: {
-						id: ulid(),
-						name: cmdState.inputString,
-						parent: boardResult.value.id,
-						rank: rankResult.value,
-					},
-					...userRes.value,
-				});
-			}
-
-			if (cmdState.modifier === 'issue') {
-				const selectedNode = getRenderedChildren(currentNode.id)[selectedIndex];
-				const swimlane =
-					currentNode.context === 'SWIMLANE'
-						? currentNode
-						: currentNode.context === 'BOARD' &&
-						  selectedNode?.context === 'SWIMLANE'
-						? selectedNode
-						: (() => {
-								const swimlaneResult = findInBreadCrumb(breadCrumb, 'SWIMLANE');
-								return isFail(swimlaneResult) ? null : swimlaneResult.value;
-						  })();
-
-				if (!swimlane) {
-					return failed('Unable to add issue in this context');
-				}
-
-				const rankResult = resolveAndPersistRankForCreate(
-					swimlane.id,
-					userRes.value,
-				);
-				if (isFail(rankResult)) return rankResult;
-
-				const issueEventsResult = createIssueEvents({
-					name: cmdState.inputString,
-					parent: swimlane.id,
-					rank: rankResult.value,
-					user: userRes.value,
-				});
-				if (isFail(issueEventsResult)) return issueEventsResult;
-
-				const issueEvents = issueEventsResult.value;
-
-				const issueResults = materializeAndPersistAll(issueEvents);
-
-				if (issueResults.some(x => isFail(x))) {
-					return failed(
-						'Issue create failed: ' +
-							issueResults
-								.filter(isFail)
-								.map(r => r.message)
-								.filter(Boolean)
-								.join(', '),
-					);
-				}
-
-				const issueResult = issueResults[0];
-				if (!issueResult || isFail(issueResult))
-					return failed('Issue creation failed');
-
-				const issueEvent = issueEvents.find(
-					(event): event is AppEvent<'add.issue'> =>
-						event.action === 'add.issue',
-				);
-
-				const ticketId = issueEvent?.payload.id;
-				if (!ticketId) return failed('Unable to determine ticket id');
-
-				navigationUtils.navigate({
-					currentNode: swimlane,
-					selectedIndex: nodeRepo
-						.getSiblings(swimlane.id)
-						.findIndex(({id}) => id === ticketId),
-				});
-
-				return succeeded('Issue created', null);
-			}
-			return succeeded('Success', null);
-		},
+		action: newCommand,
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
 	{
 		intent: CmdIntent.Rename,
+		description: 'itle] Rename the currently selected node',
 		mode: Mode.COMMAND_LINE,
-		action: () => {
+		action: async () => {
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
@@ -422,7 +275,7 @@ export const commands: CommandLineActionEntry[] = [
 			const newName = getCmdArg();
 			if (!newName) return failed('Provide a new name');
 
-			return materializeAndPersist({
+			return persistEvent({
 				id: ulid(),
 				action: 'edit.title',
 				payload: {id: node.id, name: newName},
@@ -433,8 +286,9 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.UntagTicket,
+		description: 'Remove a tag from the selected issue',
 		mode: Mode.COMMAND_LINE,
-		action: () => {
+		action: async () => {
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
@@ -449,8 +303,9 @@ export const commands: CommandLineActionEntry[] = [
 			if (!selectedNode) return failed('Invalid untag target');
 
 			const ticketResult = findAncestor(selectedNode.id, 'TICKET');
-			if (isFail(ticketResult))
+			if (isFail(ticketResult)) {
 				return failed('Unable to untag issue in this context');
+			}
 
 			const ticket = ticketResult.value;
 
@@ -463,7 +318,7 @@ export const commands: CommandLineActionEntry[] = [
 
 			if (!tagNode) return failed('Issue is not tagged with that tag');
 
-			return materializeAndPersist({
+			return persistEvent({
 				id: ulid(),
 				action: 'untag.issue',
 				payload: {
@@ -478,8 +333,9 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.TagTicket,
+		description: 'Add or create a tag on the selected issue',
 		mode: Mode.COMMAND_LINE,
-		action: () => {
+		action: async () => {
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
@@ -492,8 +348,9 @@ export const commands: CommandLineActionEntry[] = [
 			if (!selected) return failed('Invalid tag target');
 
 			const ticketResult = findAncestor(selected.id, 'TICKET');
-			if (isFail(ticketResult))
+			if (isFail(ticketResult)) {
 				return failed('Unable to tag issue in this context');
+			}
 
 			const ticket = ticketResult.value;
 			const existingTag = findTagByName(name);
@@ -504,7 +361,7 @@ export const commands: CommandLineActionEntry[] = [
 				tagId = existingTag.id;
 			} else {
 				const newTagId = ulid();
-				const createResult = materializeAndPersist({
+				const createResult = await persistEvent({
 					id: ulid(),
 					action: 'create.tag',
 					payload: {
@@ -528,13 +385,18 @@ export const commands: CommandLineActionEntry[] = [
 
 			if (alreadyTagged) return failed('Already tagged with that tag');
 
+			const persistRootResult = await getPersistRoot();
+			if (isFail(persistRootResult)) return persistRootResult;
+			const persistRoot = persistRootResult.value;
+
 			const rankResult = resolveAndPersistRankForCreate(
 				tagsField.id,
 				userRes.value,
+				persistRoot,
 			);
 			if (isFail(rankResult)) return rankResult;
 
-			return materializeAndPersist({
+			return persistEvent({
 				id: ulid(),
 				action: 'tag.issue',
 				payload: {
@@ -550,8 +412,9 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.AssignUserToTicket,
+		description: 'Assign a user to the selected issue',
 		mode: Mode.COMMAND_LINE,
-		action: () => {
+		action: async () => {
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
@@ -564,8 +427,9 @@ export const commands: CommandLineActionEntry[] = [
 			if (!selected) return failed('Invalid assign target');
 
 			const ticketResult = findAncestor(selected.id, 'TICKET');
-			if (isFail(ticketResult))
+			if (isFail(ticketResult)) {
 				return failed('Unable to assign issue in this context');
+			}
 
 			const ticket = ticketResult.value;
 			const existingContributor = findContributorByName(name);
@@ -576,7 +440,7 @@ export const commands: CommandLineActionEntry[] = [
 				contributorId = existingContributor.id;
 			} else {
 				const newContributorId = ulid();
-				const createResult = materializeAndPersist({
+				const createResult = await persistEvent({
 					id: ulid(),
 					action: 'create.contributor',
 					payload: {
@@ -600,13 +464,18 @@ export const commands: CommandLineActionEntry[] = [
 
 			if (alreadyAssigned) return failed('Assignee already assigned');
 
+			const persistRootResult = await getPersistRoot();
+			if (isFail(persistRootResult)) return persistRootResult;
+			const persistRoot = persistRootResult.value;
+
 			const rankResult = resolveAndPersistRankForCreate(
 				assigneesField.id,
 				userRes.value,
+				persistRoot,
 			);
 			if (isFail(rankResult)) return rankResult;
 
-			return materializeAndPersist({
+			return persistEvent({
 				id: ulid(),
 				action: 'assign.issue',
 				payload: {
@@ -622,8 +491,9 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.UnassignUserFromTicket,
+		description: 'Remove an assignee from the selected issue',
 		mode: Mode.COMMAND_LINE,
-		action: () => {
+		action: async () => {
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
@@ -632,15 +502,17 @@ export const commands: CommandLineActionEntry[] = [
 			if (!name) return failed('Provide an assignee to remove');
 
 			const existingContributor = findContributorByName(name);
-			if (!existingContributor)
+			if (!existingContributor) {
 				return failed(`Assignee "${name}" does not exist`);
+			}
 
 			const {selectedNode} = getState();
 			if (!selectedNode) return failed('Invalid unassign target');
 
 			const ticketResult = findAncestor(selectedNode.id, 'TICKET');
-			if (isFail(ticketResult))
+			if (isFail(ticketResult)) {
 				return failed('Unable to unassign in this context');
+			}
 
 			const ticket = ticketResult.value;
 
@@ -653,7 +525,7 @@ export const commands: CommandLineActionEntry[] = [
 
 			if (!assigneeNode) return failed(`Issue is not assigned to "${name}"`);
 
-			return materializeAndPersist({
+			return persistEvent({
 				id: ulid(),
 				action: 'unassign.issue',
 				payload: {
@@ -668,102 +540,19 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Sync,
+		description: 'Pull, commit, and push Epiq state',
 		mode: Mode.COMMAND_LINE,
 		action: syncCommand,
 	},
 	{
 		intent: CmdIntent.Peek,
+		description: 'View board state at another point in time',
 		mode: Mode.COMMAND_LINE,
-		action: async () => {
-			const boardNodeResult = findInBreadCrumb(getState().breadCrumb, 'BOARD');
-			if (isFail(boardNodeResult)) return boardNodeResult;
-
-			const epiqRootDirResult = resolveClosestEpiqRoot(process.cwd());
-			if (isFail(epiqRootDirResult)) throw new Error(epiqRootDirResult.message);
-
-			const eventsResult = loadMergedEvents(epiqRootDirResult.value);
-
-			if (isFail(eventsResult)) return failed(eventsResult.message);
-			const allEvents = eventsResult.value;
-
-			const {modifier} = getCmdState().commandMeta;
-			let targetTime: number;
-
-			if (modifier === 'now') {
-				const resetResult = resetState();
-				if (isFail(resetResult)) return resetResult;
-
-				const materializeResult = materializeAll(allEvents);
-				if (materializeResult.some(isFail)) {
-					return failed(materializeResult.map(x => x.message).join(', '));
-				}
-
-				patchState({
-					mode: Mode.DEFAULT,
-					readOnly: false,
-					timeMode: 'live',
-					unappliedEvents: [],
-				});
-
-				return succeeded('Peeking now', true);
-			}
-
-			if (modifier === 'prev') {
-				const previousEvent = getState().eventLog.at(-2);
-				const previousTime = getEventTime(previousEvent);
-				if (previousTime === null) return failed('No previous event to peek');
-				targetTime = previousTime;
-			} else if (modifier === 'next') {
-				const nextEvent = getState().unappliedEvents.at(0);
-				const nextTime = getEventTime(nextEvent);
-				if (nextTime === null) return failed('No next event to peek');
-				targetTime = nextTime;
-			} else {
-				const targetDate = parsePeekDateInput(modifier);
-				if (!targetDate) {
-					return failed('Invalid peek date');
-				}
-
-				targetTime = targetDate.getTime();
-			}
-
-			const boardId = boardNodeResult.value.id;
-			const {appliedEvents, unappliedEvents} = splitEventsAtTime(
-				allEvents,
-				targetTime,
-			);
-
-			const resetResult = resetState();
-			if (isFail(resetResult)) return resetResult;
-
-			const materializeResult = materializeAll(appliedEvents);
-			if (materializeResult.some(isFail)) {
-				return failed(materializeResult.map(x => x.message).join(', '));
-			}
-
-			const boardNode = getState().nodes[boardId];
-			if (!boardNode) {
-				return failed('Board did not exist at peek date');
-			}
-
-			navigationUtils.navigate({
-				currentNode: boardNode,
-				selectedIndex: 0,
-			});
-
-			patchState({
-				mode: Mode.DEFAULT,
-				readOnly: true,
-				timeMode: 'peek',
-				unappliedEvents: unappliedEvents,
-			});
-
-			return succeeded(`Peeking `, true);
-		},
+		action: peekCommand,
 	},
-
 	{
 		intent: CmdIntent.Export,
+		description: 'Export the current board layout to markdown',
 		mode: Mode.COMMAND_LINE,
 		action: async () => {
 			const exportResult = await exportBoardLayout();
@@ -778,6 +567,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Exit,
+		description: 'Exit the application',
 		mode: Mode.COMMAND_LINE,
 		action: async () => {
 			navigationUtils.exit();
@@ -786,8 +576,9 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Edit,
+		description: 'Edit title or description',
 		mode: Mode.COMMAND_LINE,
-		action: (_, cmdState) => {
+		action: async (_, cmdState) => {
 			if (cmdState.modifier === EditModifiers.DESCRIPTION) {
 				return editCommand();
 			}
@@ -804,7 +595,7 @@ export const commands: CommandLineActionEntry[] = [
 				const newName = cmdState.inputString.trim();
 				if (!newName) return failed('Provide a new name');
 
-				return materializeAndPersist({
+				return persistEvent({
 					id: ulid(),
 					action: 'edit.title',
 					payload: {id: node.id, name: newName},
@@ -818,6 +609,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Config,
+		description: 'Update editor, username, view, autosync, or sync debounce',
 		mode: Mode.COMMAND_LINE,
 		action: (_, cmdState) => {
 			const value = cmdState.inputString.trim();

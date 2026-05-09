@@ -186,8 +186,8 @@ function loadAllPersistedEvents(
 	return succeeded('All events loaded', getSortedEvents(entries));
 }
 
-export function loadMergedEvents(epiqRoot: string): Result<AppEvent[]> {
-	const allEvents = loadAllPersistedEvents(epiqRoot);
+export function loadMergedEvents(stateBranchRoot: string): Result<AppEvent[]> {
+	const allEvents = loadAllPersistedEvents(stateBranchRoot);
 	if (isFail(allEvents)) {
 		return failed(allEvents.message);
 	}

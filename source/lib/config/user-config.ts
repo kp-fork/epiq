@@ -72,7 +72,7 @@ export const readEpiqConfig = (): Result<EpiqConfig> => {
 
 	if (raw == null || raw.trim() === '') {
 		return succeeded('No config found, using empty config', {
-			autoSync: false,
+			autoSync: null,
 			preferredEditor: '',
 			userId: '',
 			userName: '',

@@ -27,8 +27,8 @@ export const ContextBar: React.FC<Props> = ({width, mode, availableHints}) => {
 
 	return (
 		<Box>
-			{mode === Mode.COMMAND_LINE ? (
-				<CommandLine width={width} />
+			{mode === Mode.COMMAND_LINE || mode === Mode.PALETTE ? (
+				<CommandLine width={width} mode={mode} />
 			) : (
 				<ContextBarInfo
 					width={width}

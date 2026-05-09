@@ -1,3 +1,15 @@
 {
-	"cSpell.words": ["AUTOSYNC", "epiq", "worktree", "Worktrees"]
+	"cSpell.words": ["AUTOSYNC", "epiq", "worktree", "Worktrees"],
+	"eslint.validate": [
+		"javascript",
+		"javascriptreact",
+		"typescript",
+		"typescriptreact"
+	],
+	"eslint.nodePath": "./node_modules",
+	"eslint.workingDirectories": [
+		{
+			"mode": "auto"
+		}
+	]
 }

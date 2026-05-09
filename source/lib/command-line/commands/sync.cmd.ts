@@ -1,11 +1,16 @@
-import {syncAndHydrateState} from '../../../git/sync.js';
+import {syncAndReloadState} from '../../../git/sync.js';
 import {Mode} from '../../model/action-map.model.js';
 import {failed, isFail} from '../../model/result-types.js';
 import {setCmdInput} from '../../state/cmd.state.js';
-import {getState, patchState} from '../../state/state.js';
+import {getSafeState, patchState} from '../../state/state.js';
 
 export const syncCommand = async () => {
-	if (getState().syncStatus.status === 'syncing') {
+	const stateResult = getSafeState();
+	if (isFail(stateResult)) {
+		return failed(stateResult.message);
+	}
+
+	if (stateResult.value.syncStatus.status === 'syncing') {
 		return failed('Sync already in progress');
 	}
 
@@ -18,7 +23,8 @@ export const syncCommand = async () => {
 		},
 	});
 
-	const result = await syncAndHydrateState();
+	const result = await syncAndReloadState();
+
 	if (isFail(result)) {
 		patchState({
 			syncStatus: {
@@ -30,7 +36,13 @@ export const syncCommand = async () => {
 		return result;
 	}
 
-	patchState({mode: Mode.DEFAULT});
+	patchState({
+		mode: Mode.DEFAULT,
+		syncStatus: {
+			msg: 'Synced',
+			status: 'synced',
+		},
+	});
 
 	return result;
 };

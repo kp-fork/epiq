@@ -1,30 +1,41 @@
 import {failed, Result} from '../model/result-types.js';
-import {patchState} from './state.js';
+import {isStateInitialized, patchState} from './state.js';
 
-export const setSyncing = (msg = 'Syncing...') => {
+const patchSyncStatus = ({
+	status,
+	msg,
+}: {
+	status: 'synced' | 'outOfSync' | 'syncing';
+	msg: string;
+}) => {
+	if (!isStateInitialized()) return;
+
 	patchState({
 		syncStatus: {
-			status: 'syncing',
+			status,
 			msg,
 		},
+	});
+};
+
+export const setSyncing = (msg = 'Syncing...') => {
+	patchSyncStatus({
+		status: 'syncing',
+		msg,
 	});
 };
 
 export const setSynced = (msg = 'Synced') => {
-	patchState({
-		syncStatus: {
-			status: 'synced',
-			msg,
-		},
+	patchSyncStatus({
+		status: 'synced',
+		msg,
 	});
 };
 
 export const setOutOfSync = (msg: string) => {
-	patchState({
-		syncStatus: {
-			status: 'outOfSync',
-			msg,
-		},
+	patchSyncStatus({
+		status: 'outOfSync',
+		msg,
 	});
 };
 

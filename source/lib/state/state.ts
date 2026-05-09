@@ -30,7 +30,7 @@ export type BaseState = Omit<AppState, DerivedKeys>;
 // -----------------------------
 // Internal store
 // -----------------------------
-let _appState: AppState;
+let _appState: AppState | undefined;
 let _initialWorkspace: Workspace | undefined;
 
 const listeners = new Set<() => void>();
@@ -103,25 +103,29 @@ function derive(state: BaseState): Result<AppState> {
 // -----------------------------
 export const getState = () => {
 	if (!_appState) {
-		logger.error(
-			'State not initialized. Call initWorkspaceState() first.',
-			new Error().stack,
-		);
+		throw new Error('State not initialized. Call initWorkspaceState() first.');
 	}
+
 	return _appState;
+};
+export const getSafeState = () => {
+	if (!_appState)
+		return failed('State not initialized. Call initWorkspaceState() first.');
+
+	return succeeded('Retrieved state', _appState);
 };
 
 export function initWorkspaceState(workspace: Workspace) {
 	_initialWorkspace = workspace;
 	const repoRootResult = resolveClosestEpiqProjectRoot(process.cwd());
 
-	let hasProject = false;
+	let hasProjectDefinition = false;
 
 	if (!isFail(repoRootResult)) {
 		const projectResult = readProjectFile(repoRootResult.value);
 		if (isFail(projectResult)) return failed(projectResult.message);
 
-		hasProject = true;
+		hasProjectDefinition = true;
 	}
 
 	const base: BaseState = {
@@ -142,7 +146,8 @@ export function initWorkspaceState(workspace: Workspace) {
 		eventLog: [],
 		unappliedEvents: [],
 		timeMode: 'live',
-		hasProject: hasProject,
+		hasProjectDefinition,
+		hasInitializingEvents: false,
 	};
 
 	const deriveResult = derive(base);
@@ -229,3 +234,5 @@ export const resetState = (): Result<string> => {
 
 	return initWorkspaceState(_initialWorkspace);
 };
+
+export const isStateInitialized = () => _appState !== undefined;

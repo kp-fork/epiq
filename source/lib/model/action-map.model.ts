@@ -7,6 +7,7 @@ export const Mode = {
 	MOVE: 'move',
 	HELP: 'help',
 	COMMAND_LINE: 'command-line',
+	PALETTE: 'palette',
 } as const;
 export type ModeUnion = (typeof Mode)[keyof typeof Mode];
 
@@ -14,7 +15,7 @@ export type ActionEntry = {
 	systemOnly?: boolean;
 	intent?: string;
 	mode: ModeUnion;
-	description?: `[${string}] ${string}`;
+	description?: `${string}`;
 	action: (...args: [ActionEntry, readline.Key]) => Result | Promise<Result>;
 };
 

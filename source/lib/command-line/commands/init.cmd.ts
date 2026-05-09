@@ -19,11 +19,10 @@ import {
 	pushStateBranch,
 	stageStateBranchOwnEventFile,
 } from '../../../git/git.js';
-import {hydrateEventsFromStateBranch} from '../../../git/merge.js';
 import {navigationUtils} from '../../actions/default/navigation-action-utils.js';
 import {getUserSetupStatus} from '../../config/setup-utils.js';
 import {createDefaultEvents} from '../../event/event-boot.js';
-import {materializeAndPersistAll} from '../../event/event-materialize-and-persist.js';
+import {materializeAll} from '../../event/event-materialize.js';
 import {getPersistFileName, persist} from '../../event/event-persist.js';
 import {Mode} from '../../model/action-map.model.js';
 import {failed, isFail, succeeded} from '../../model/result-types.js';
@@ -32,7 +31,7 @@ import {
 	getProjectFileContents,
 } from '../../project-setup/project-setup.js';
 import {getSettingsState} from '../../state/settings.state.js';
-import {getState, patchState} from '../../state/state.js';
+import {getSafeState, patchState} from '../../state/state.js';
 import {hasLocalProjectFile} from '../../storage/paths.js';
 
 const hasDiff = async (repoRoot: string) => {
@@ -52,7 +51,6 @@ const failAt = (step: number, message: string) =>
 export const initCommand = async () => {
 	const projectFileContents = getProjectFileContents();
 
-	// :init
 	// 1. fail if not in git repo
 	const repoRootResult = await getRepoRootDir(process.cwd());
 	if (isFail(repoRootResult)) {
@@ -72,7 +70,7 @@ export const initCommand = async () => {
 		);
 	}
 
-	// 3 fail if there are files in the diff
+	// 3. fail if there are files in the diff
 	const diffResult = await hasDiff(repoRoot);
 	if (isFail(diffResult)) {
 		return failAt(2.5, diffResult.message);
@@ -90,7 +88,7 @@ export const initCommand = async () => {
 		return failAt(4, 'Epiq project already initialized');
 	}
 
-	// 5. resolve repo root/user ids from ~/.epiq-global/config.json
+	// 5. resolve user ids from ~/.epiq-global/config.json
 	const setupStatus = getUserSetupStatus();
 	if (!setupStatus.isSetupDone || !setupStatus.userName) {
 		return failAt(
@@ -117,9 +115,13 @@ export const initCommand = async () => {
 		return failAt(6, stateBranchExistsResult.message);
 	}
 
+	if (stateBranchExistsResult.value) {
+		return failAt(6, `State branch already exists: ${stateBranch}`);
+	}
+
 	const createStateBranchResult = await createStateBranch({
 		repoRoot,
-		stateBranchName: projectFileContents.stateBranch,
+		stateBranchName: stateBranch,
 	});
 	if (isFail(createStateBranchResult)) {
 		return failAt(6, createStateBranchResult.message);
@@ -140,15 +142,13 @@ export const initCommand = async () => {
 	const ensureWorktreeResult = await ensureStateBranchWorktree({
 		repoRoot,
 		stateBranchRoot,
-		stateBranchName: projectFileContents.stateBranch,
+		stateBranchName: stateBranch,
 	});
 	if (isFail(ensureWorktreeResult)) {
 		return failAt(8, ensureWorktreeResult.message);
 	}
 
-	// 9. Create .epiq folder in state branch
-	// and write initial event log to worktree:
-	// ~/.epiq-global/worktrees/<tree-id>/.epiq/events/<userid>.<username>.jsonl
+	// 9. write initial event log directly to authoritative state worktree
 	const stateEpiqDir = path.join(stateBranchRoot, '.epiq');
 	fs.mkdirSync(stateEpiqDir, {recursive: true});
 
@@ -179,30 +179,30 @@ export const initCommand = async () => {
 		return failAt(10, commitStateBranchResult.message);
 	}
 
-	// 11. switch back to original branch (no-op)
-
-	// 12. ensure .epiq/events and .epiq/log are ignored
+	// 11. ensure local-only paths are ignored.
+	// .epiq/events is no longer used as storage, but keeping it ignored is harmless
+	// for legacy directories and avoids accidental commits.
 	const ignoreResult = await ensureLocalEpiqIgnored(repoRoot);
 	if (isFail(ignoreResult)) {
-		return failAt(12, ignoreResult.message);
+		return failAt(11, ignoreResult.message);
 	}
 
-	// 13. create .epiq/project.json
+	// 12. create .epiq/project.json
 	const projectResult = ensureProjectFile({
 		repoRoot,
 		fileContents: projectFileContents,
 	});
 	if (isFail(projectResult)) {
-		return failAt(13, projectResult.message);
+		return failAt(12, projectResult.message);
 	}
 
-	// 14. commit .epiq/project.json on original branch
+	// 13. commit .epiq/project.json on original branch
 	const stageProjectResult = await git.stage({
 		cwd: repoRoot,
 		pathspec: ['.epiq/project.json', '.gitignore'],
 	});
 	if (isFail(stageProjectResult)) {
-		return failAt(14, stageProjectResult.message);
+		return failAt(13, stageProjectResult.message);
 	}
 
 	const commitProjectResult = await git.commit({
@@ -210,58 +210,55 @@ export const initCommand = async () => {
 		message: '[epiq:init-project]',
 	});
 	if (isFail(commitProjectResult)) {
-		return failAt(14, commitProjectResult.message);
-	}
-
-	// 15. sync state branch events into local .epiq/events
-	const hydrateResult = hydrateEventsFromStateBranch({
-		repoRoot,
-		stateBranchRoot,
-	});
-	if (isFail(hydrateResult)) {
-		return failAt(15, hydrateResult.message);
+		return failAt(13, commitProjectResult.message);
 	}
 
 	let successMessage = 'Project initialized!';
 
-	// 16. try - push original branch first.
-	// Order is important for empty remotes: the first pushed branch may become the inferred default branch.
+	// 14. try push original branch first.
 	const pushOriginalResult = await execGit({
 		cwd: repoRoot,
 		args: ['push', '-u', 'origin', 'HEAD'],
 	});
 	if (isFail(pushOriginalResult)) {
-		successMessage += ` Warn: [init:16] ${pushOriginalResult.message}`;
+		successMessage += ` Warn: [init:14] ${pushOriginalResult.message}`;
 	}
 
-	// 17. try - push state branch / set upstream
+	// 15. try push state branch / set upstream
 	const pushStateResult = await pushStateBranch({
 		repoRoot,
 		stateBranchRoot,
 	});
 	if (isFail(pushStateResult)) {
-		successMessage += ` Warn: [init:17] ${pushStateResult.message}`;
+		successMessage += ` Warn: [init:15] ${pushStateResult.message}`;
 	}
 
-	// 18. boot app
-	const materializeResults = materializeAndPersistAll(
-		defaultEventsResult.value,
-	);
+	// 16. boot app from the same default events.
+	// Do not persist again here; authoritative persistence already happened
+	// in the state branch worktree above.
+	const materializeResults = materializeAll(defaultEventsResult.value);
 	const failures = materializeResults.filter(isFail);
 
 	if (failures.length > 0) {
-		return failAt(18, failures.map(f => f.message).join('\n'));
+		return failAt(16, failures.map(f => f.message).join('\n'));
+	}
+	const stateResult = getSafeState();
+	if (isFail(stateResult)) return failAt(16, stateResult.message);
+
+	const {rootNodeId, nodes} = stateResult.value;
+	const rootNode = nodes[rootNodeId];
+
+	if (!rootNode) {
+		return failAt(16, 'Unable to resolve initialized root node');
 	}
 
-	const {rootNodeId, nodes} = getState();
-
 	navigationUtils.navigate({
-		currentNode: nodes[rootNodeId],
+		currentNode: rootNode,
 		selectedIndex: 0,
 	});
 
 	patchState({
-		hasProject: true,
+		hasProjectDefinition: true,
 		mode: Mode.DEFAULT,
 	});
 

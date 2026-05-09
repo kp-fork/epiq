@@ -4,11 +4,7 @@ import {decodeTime, monotonicFactory} from 'ulid';
 import {z} from 'zod';
 import {failed, isFail, Result, succeeded} from '../model/result-types.js';
 import {getSettingsState, User} from '../state/settings.state.js';
-import {
-	ensureEventsDir,
-	getEventsDirPath,
-	resolveClosestEpiqRoot,
-} from '../storage/paths.js';
+import {ensureEventsDir, getEventsDirPath} from '../storage/paths.js';
 import {getEdgeRef} from './event-load.js';
 import {
 	AppEvent,
@@ -120,28 +116,24 @@ export const toPersistedEvent = (
 
 	return parsePersistedEvent(candidate);
 };
-
 export function persist({
 	event,
-	rootDir = process.cwd(),
+	rootDir,
 }: {
 	event: AppEvent;
-	rootDir?: string;
+	rootDir: string;
 }): Result<PersistSuccess> {
 	try {
-		const resolvedRootResult = resolveClosestEpiqRoot(rootDir);
-		if (isFail(resolvedRootResult)) return resolvedRootResult;
-
-		const ensureEventsDirResult = ensureEventsDir(resolvedRootResult.value);
+		const ensureEventsDirResult = ensureEventsDir(rootDir);
 		if (isFail(ensureEventsDirResult)) return ensureEventsDirResult;
 
-		const filePath = getEventLogPath(resolvedRootResult.value, {
+		const filePath = getEventLogPath(rootDir, {
 			userId: event.userId,
 			userName: event.userName,
 		});
 		if (isFail(filePath)) return filePath;
 
-		const edgeRef = getEdgeRef(resolvedRootResult.value);
+		const edgeRef = getEdgeRef(rootDir);
 		if (isFail(edgeRef)) return failed(edgeRef.message);
 
 		const newId = edgeRef.value

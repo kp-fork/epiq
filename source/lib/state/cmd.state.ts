@@ -4,6 +4,7 @@ import {parseCommandLine} from '../command-line/command-parser.js';
 import {Result, succeeded} from '../model/result-types.js';
 import {CmdValidity, cmdValidity} from '../command-line/cmd-validity.js';
 import {CmdKeyword} from '../command-line/cmd-keywords.js';
+import {useSyncExternalStore} from 'react';
 
 const isWordBoundary = (char: string | undefined) =>
 	char === commandDelimiter || char === ':';
@@ -241,6 +242,9 @@ export const getNextCmd = () => {
 export const clearCmd = () => setCmdInput(() => '');
 
 export const getCmdState = () => commandLineState;
+
+export const useCmdState = () =>
+	useSyncExternalStore(subscribeCommandLineState, getCmdState, getCmdState);
 
 export const getCmdArg = () => {
 	const [_, ...rest] = commandLineState.value.split(commandDelimiter);

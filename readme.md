@@ -2,74 +2,56 @@
 
 # Epiq
 
-_Distributed CLI based issue tracker TUI_ backed by Git.
+_Distributed terminal-native issue tracker backed by Git._
 
-Issue tracking is a part of the development lifecycle, but it often becomes a painful context switching exercise with poor ergonomics. `Epiq` provides issue tracking as a portable, integrated part of the development environment, with access to all the powerful tooling developers are used to. Epiq allows you to manage all your projects directly via the command line in a visual kanban board and edit content in your favorite editor.
+Issue tracking is a core part of software development, but it often becomes a painful context-switching exercise with poor ergonomics. Epiq provides issue tracking as a portable, integrated part of the development environment, with access to all the powerful tooling developers are used to.
 
-With great attention to user ergonomics, epiq intends to make project management painless and friction free again, and has developer satisfaction as its primary target.
+> You can manage all your projects directly via the command line in a visual kanban board and edit content in your favorite editor.
+
+With great attention to user ergonomics and developer experience, epiq makes project management painless and friction free.
 
 ```
-'███████╗██████╗ ██╗ ██████╗ '
-'██╔════╝██╔══██╗██║██╔═══██╗'
-'█████╗  ██████╔╝██║██║   ██║'
-'██╔══╝  ██╔═══╝ ██║██║▄▄ ██║'
-'███████╗██║     ██║╚██████╔╝'
-'╚══════╝╚═╝     ╚═╝ ╚═══▀▀╝ '
- 🫡 Never leave your editor!
+███████╗██████╗ █ █╗ ██████╗
+██╔════╝██╔══██╗█ █║██╔═══██╗
+█████╗  ██████╔╝█ █║██║   ██║
+██╔══╝  ██╔═══╝ █ █║██║▄▄ ██║
+███████╗██║     █ █║╚██████╔╝
+╚══════╝╚═╝     ╚══╝ ╚═══▀▀╝
+🫡 Never leave the terminal
 ```
 
 ## What is epiq?
 
-Epiq is a vim-inspired issue tracker fully integrated in the terminal that brings the tooling to the developers’ fingertips - in their comfort zone.
+Epiq is a vim-inspired issue tracker that brings project management into the terminal. It renders directly in ASCII and persists state as an immutable distributed event log, versioned and synchronized through Git.
 
-Epiq renders your issue board directly in the terminal using ASCII and stores its state as an event log, versioned and synchronized through Git.
-
-![Epiq cli kanban view](https://raw.Githubusercontent.com/ljtn/epiq/main/assets/overview.png)
-![Epiq cli log view](https://raw.Githubusercontent.com/ljtn/epiq/main/assets/log.png)
+![Epiq cli kanban view](https://raw.githubusercontent.com/ljtn/epiq/main/assets/overview.png)
+![Epiq cli log view](https://raw.githubusercontent.com/ljtn/epiq/main/assets/log.png)
 
 ## Features
 
 - Issue tracking — track work in tickets with name, description, tags, assignees, history log, etc.
 - Ergonomics — fast keyboard-driven UX, command line with history, syntax highlighting etc.
+- Command palette — press `?` to open a scrollable overview of all available commands and descriptions
 - Time travel — inspect your app 1h, 1 week or 1 year ago
 - Filtering — query issues by description, tags, assignees, etc.
-- Autocompletion — minimize typing, stay in flow
+- Autocompletion — minimize typing, stay in flow, reuse previous commands
 - Multi-user — collaborative synchronization via Git
 - Traceable event log — state is a full history of every change ever made
+- MCP integration - Model Context Protocol support for agent interaction
 
 ## Why epiq?
 
-Most issue trackers live outside your workflow. Epiq brings issue tracking into your editor and your repo—where you already work.
+Most issue trackers live outside your workflow. Epiq brings issue tracking where you already work.
 
 These design choices result in a system that is:
 
 - **Simple setup** — no accounts, SaaS, or external services required
 - **Repo-native** — your issues can live where your code lives
-- **Offline-friendly** — works anywhere, with eventual consistency as a promise
+- **Offline-friendly** — works anywhere, with eventual consistency
 - **Speed** — local first, and eventual consistency makes epiq edits instant
 - **Portable** — run on your local machine, on a remote Linux server or your grandma’s connected toaster
 - **Command driven** — scriptable and automation-friendly, ready for the agentic era
-- **Versioned** — every change is tracked and recoverable through Git
-
----
-
-## MCP & Agent Compatibility
-
-Epiq provides a MCP (Model Context Protocol) server for agents to interact with, making it easy to plug into modern agent frameworks.
-
-To register Epiq with MCP-compatible clients (e.g. Claude Desktop), add it as a server using the `epiq-mcp` binary. Example configuration:
-
-```json
-{
-	"mcpServers": {
-		"epiq": {
-			"command": "epiq-mcp"
-		}
-	}
-}
-```
-
-Once registered, agents can interact with your local Epiq instance through the MCP.
+- **Versioned** — changes are tracked and recoverable through Git
 
 ---
 
@@ -129,16 +111,15 @@ That’s it!
 >
 > - Project definition in `./.epiq/project.json`
 > - Authoritative Git state at `~/.epiq-global/worktrees/<id>`
-> - Local cache in `./.epiq/events/` (ignored by Git)
-> - Update your `.Gitignore` to ignore local-only directories (`.epiq/events/`, `.epiq/log/`)
-
-> Epiq manages a dedicated Git state branch and worktree automatically as the source of truth for synchronization
+> - Updates your `.gitignore` to ignore local-only `.epiq/log/`
+>   Epiq manages a dedicated Git state branch and worktree automatically as the source of truth for synchronization.
 
 ## Usage Guide
 
 ### Help
 
 - The first thing to know is that you always can access help with `:help`.
+- Press `?` anytime to open the command palette with all available commands and descriptions.
 
 ### Navigation
 
@@ -178,19 +159,29 @@ Clear all filters with `:filter clear`
 
 ---
 
+## MCP & Agent Compatibility
+
+Epiq provides a MCP (Model Context Protocol) server for agents to interact with, making it easy to plug into modern agent frameworks.
+
+To register Epiq with MCP-compatible clients (e.g. Claude Desktop), add it as a server using the `epiq-mcp` binary. Example configuration:
+
+```json
+{
+	"mcpServers": {
+		"epiq": {
+			"command": "epiq-mcp"
+		}
+	}
+}
+```
+
+Once registered, agents can interact with your local Epiq instance through the MCP.
+
+---
+
 ## How epiq is synchronized
 
-Epiq separates state into:
-
-- **Source of truth** - Git state branch
-- **Local cache** - `.epiq/events/`
-
-Epiq uses Git in the background - no manual Git commands are required. Running `:sync` pulls and pushes changes between your local state and the remote state.
-
-- Your issue data is stored in a dedicated branch managed automatically by epiq
-- A `.epiq/` folder is created in your project:
-  - `project.json` stores project metadata
-  - `events/` is a local cache of synchronized event logs (ignored by Git)
+Epiq uses Git in the background - no manual Git commands are required. Running `:sync` synchronizes changes between your local state (persisted at `~/.epiq-global/worktrees/<id>/`) and the remote state. By utilizing Git worktrees, synchronization stays isolated from your regular development workflow. Project tracking metadata is stored in `.epiq/project.json`.
 
 ## Conflict Avoidance & Data Integrity
 
@@ -235,4 +226,4 @@ Epiq follows a **local-first** model:
 
 ---
 
-🫡 Never leave your editor!
+🫡 Never leave the terminal!

@@ -1,6 +1,9 @@
 import readline from 'readline';
 import {Mode, ModeUnion} from '../model/action-map.model.js';
-import {getCommandLineIntent} from './get-command-line-intent.js';
+import {
+	getCommandLineIntent,
+	getPaletteInputIntent,
+} from './get-command-line-intent.js';
 import {getState} from '../state/state.js';
 import {getCmdState} from '../state/cmd.state.js';
 import {getSettingsState} from '../state/settings.state.js';
@@ -30,6 +33,7 @@ export const Intent = {
 	Delete: 'Delete',
 
 	// Command line
+	InitCommandPalette: 'initCommandPalette',
 	InitCommandLine: 'initCommandLine',
 	ExitCommandLine: 'exitCommandLine',
 	CaptureInput: 'captureInput',
@@ -55,7 +59,9 @@ export const Intent = {
 
 export type IntentInferred = (typeof Intent)[keyof typeof Intent];
 
-function getDir(key: readline.Key): 'up' | 'down' | 'left' | 'right' | null {
+function getDefaultDir(
+	key: readline.Key,
+): 'up' | 'down' | 'left' | 'right' | null {
 	switch (key.name) {
 		// arrows
 		case 'up':
@@ -64,6 +70,12 @@ function getDir(key: readline.Key): 'up' | 'down' | 'left' | 'right' | null {
 		case 'right':
 			return key.name;
 
+		default:
+			return null;
+	}
+}
+function getVimDir(key: readline.Key): 'up' | 'down' | 'left' | 'right' | null {
+	switch (key.name) {
 		// vim
 		case 'k':
 			return 'up';
@@ -128,6 +140,9 @@ export function getKeyIntent(
 ): IntentInferred | null {
 	// Handle forks
 	const commandLineState = getCmdState();
+	if (key.sequence === '?' && commandLineState.value === '')
+		return Intent.InitCommandPalette;
+
 	if (key.sequence === ':' && commandLineState.value === '')
 		return Intent.InitCommandLine;
 
@@ -141,31 +156,12 @@ export function getKeyIntent(
 
 	if (mode === Mode.COMMAND_LINE)
 		return getCommandLineIntent(key, commandLineState.value);
+	if (mode === Mode.PALETTE)
+		return getPaletteInputIntent(key, commandLineState.value);
 
 	// Navigation keys
-	const dir = getDir(key);
-	if (dir) {
-		let dirMap =
-			mode === Mode.MOVE
-				? {
-						prevItem: Intent.MovePreviousItem,
-						nextItem: Intent.MoveNextItem,
-						prevContainer: Intent.MoveToPreviousContainer,
-						nextContainer: Intent.MoveToNextContainer,
-				  }
-				: {
-						prevItem: Intent.NavPreviousItem,
-						nextItem: Intent.NavNextItem,
-						prevContainer: Intent.NavToPreviousContainer,
-						nextContainer: Intent.NavToNextContainer,
-				  };
-
-		return mapDirectionalIntent(
-			getState().currentNode.childRenderAxis,
-			dir,
-			dirMap,
-		);
-	}
+	const dir = getDefaultDir(key) || getVimDir(key);
+	if (dir) return normalizeIntent(dir, mode);
 
 	// Hard exit
 	if (key.ctrl && key.name === 'c') return Intent.Exit;
@@ -196,4 +192,30 @@ export function getKeyIntent(
 		default:
 			return null;
 	}
+}
+
+function normalizeIntent(
+	dir: 'up' | 'down' | 'left' | 'right',
+	mode: ModeUnion,
+) {
+	const dirMap =
+		mode === Mode.MOVE
+			? {
+					prevItem: Intent.MovePreviousItem,
+					nextItem: Intent.MoveNextItem,
+					prevContainer: Intent.MoveToPreviousContainer,
+					nextContainer: Intent.MoveToNextContainer,
+			  }
+			: {
+					prevItem: Intent.NavPreviousItem,
+					nextItem: Intent.NavNextItem,
+					prevContainer: Intent.NavToPreviousContainer,
+					nextContainer: Intent.NavToNextContainer,
+			  };
+
+	return mapDirectionalIntent(
+		getState().currentNode.childRenderAxis,
+		dir,
+		dirMap,
+	);
 }
