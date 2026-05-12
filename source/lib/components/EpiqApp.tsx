@@ -27,7 +27,7 @@ export default function EpiqApp({width, height}: EpiqAppProps) {
 	if (state.mode === Mode.HELP) {
 		return (
 			<Box flexDirection="column">
-				<HelpUI width={width} />
+				<HelpUI width={width} height={height} />
 			</Box>
 		);
 	}
@@ -111,7 +111,7 @@ export default function EpiqApp({width, height}: EpiqAppProps) {
 				<WorkspaceUI
 					width={width}
 					height={height}
-					currentNode={state.currentNode}
+					contextNode={state.contextNode}
 					selectedIndex={state.selectedIndex}
 					breadCrumb={state.breadCrumb}
 					viewMode={getSettingsState().viewMode ?? 'dense'}

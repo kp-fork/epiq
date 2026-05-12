@@ -103,14 +103,6 @@ export const inputActions: ActionEntry[] = [
 			return succeeded('Viewing help', null);
 		},
 	},
-	{
-		intent: Intent.Exit,
-		mode: Mode.HELP,
-		action: () => {
-			patchState({mode: Mode.DEFAULT});
-			return succeeded('Exiting help', null);
-		},
-	},
 
 	...COMMAND_INPUT_MODES.flatMap(createCommandInputActions),
 
@@ -120,14 +112,6 @@ export const inputActions: ActionEntry[] = [
 		action: () => {
 			patchState({mode: Mode.DEFAULT});
 			return succeeded('Exiting command line', null);
-		},
-	},
-	{
-		intent: Intent.ExitCommandLine,
-		mode: Mode.PALETTE,
-		action: () => {
-			patchState({mode: Mode.DEFAULT});
-			return succeeded('Exiting palette', null);
 		},
 	},
 	{

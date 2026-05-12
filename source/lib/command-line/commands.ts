@@ -36,6 +36,7 @@ import {peekCommand} from './commands/peek.cmd.js';
 import {setAutoSyncDurationCommand} from './commands/set-auto-sync-duration.cmd.js';
 import {setAutoSyncCommand} from './commands/set-auto-sync.cmd.js';
 import {syncCommand} from './commands/sync.cmd.js';
+import {patchUiState} from '../state/ux-state.js';
 
 const findTagByName = (name: string) =>
 	Object.values(getState().tags).find(tag => tag.name === name);
@@ -61,8 +62,8 @@ export const commands: CommandLineActionEntry[] = [
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
-			const {currentNode, selectedIndex} = getState();
-			const child = getRenderedChildren(currentNode.id)[selectedIndex];
+			const {contextNode, selectedIndex} = getState();
+			const child = getRenderedChildren(contextNode.id)[selectedIndex];
 			if (!child) return failed('Unable to resolve child to delete');
 
 			return persistEvent({
@@ -113,6 +114,15 @@ export const commands: CommandLineActionEntry[] = [
 		description: 'Open the help screen',
 		mode: Mode.COMMAND_LINE,
 		action: () => {
+			const {contextNode, selectedIndex, selectedNode, breadCrumb} = getState();
+			patchUiState({
+				pendingNavTarget: {
+					contextNode,
+					breadCrumb,
+					selectedIndex,
+					selectedNode,
+				},
+			});
 			patchState({mode: Mode.HELP});
 			return succeeded('Viewing help', null);
 		},
@@ -125,8 +135,8 @@ export const commands: CommandLineActionEntry[] = [
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
-			const {currentNode, selectedIndex} = getState();
-			const target = getRenderedChildren(currentNode.id)[selectedIndex];
+			const {contextNode, selectedIndex} = getState();
+			const target = getRenderedChildren(contextNode.id)[selectedIndex];
 
 			if (!target) return failed('Unable to close issue, no target found');
 			if (!isTicketNode(target)) return failed('Cannot close in this context');
@@ -176,8 +186,8 @@ export const commands: CommandLineActionEntry[] = [
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
-			const {currentNode, selectedIndex} = getState();
-			const target = getRenderedChildren(currentNode.id)[selectedIndex];
+			const {contextNode, selectedIndex} = getState();
+			const target = getRenderedChildren(contextNode.id)[selectedIndex];
 
 			if (!target) return failed('Unable to reopen issue, no target found');
 
@@ -264,13 +274,13 @@ export const commands: CommandLineActionEntry[] = [
 			const userRes = resolveActorId();
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
-			const {currentNode, selectedIndex} = getState();
-			const node = getRenderedChildren(currentNode.id)[selectedIndex];
+			const {contextNode, selectedIndex} = getState();
+			const node = getRenderedChildren(contextNode.id)[selectedIndex];
 			if (!node) return failed('Missing node');
 			if (node.readonly) return failed('Cannot rename readonly node');
 
 			const newName = getCmdArg();
-			if (!newName) return failed('Provide a new name');
+			if (!newName) return failed('Provide a title');
 
 			return persistEvent({
 				id: ulid(),
@@ -400,8 +410,8 @@ export const commands: CommandLineActionEntry[] = [
 			const name = (modifier || inputString).trim();
 			if (!name) return failed('Provide an assignee');
 
-			const {selectedIndex, currentNode} = getState();
-			const selected = getRenderedChildren(currentNode.id)[selectedIndex];
+			const {selectedIndex, contextNode} = getState();
+			const selected = getRenderedChildren(contextNode.id)[selectedIndex];
 			if (!selected) return failed('Invalid assign target');
 
 			const ticketResult = findAncestor(selected.id, 'TICKET');
@@ -547,13 +557,13 @@ export const commands: CommandLineActionEntry[] = [
 				const userRes = resolveActorId();
 				if (isFail(userRes)) return failed('Unable to resolve user ID');
 
-				const {currentNode, selectedIndex} = getState();
-				const node = getRenderedChildren(currentNode.id)[selectedIndex];
+				const {contextNode, selectedIndex} = getState();
+				const node = getRenderedChildren(contextNode.id)[selectedIndex];
 				if (!node) return failed('Missing node');
 				if (node.readonly) return failed('Cannot rename readonly node');
 
 				const newName = cmdState.inputString.trim();
-				if (!newName) return failed('Provide a new name');
+				if (!newName) return failed('Provide a title');
 
 				return persistEvent({
 					id: ulid(),

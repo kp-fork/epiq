@@ -3,9 +3,9 @@ import path from 'node:path';
 import {decodeTime} from 'ulid';
 import {z} from 'zod';
 import {failed, isFail, Result, succeeded} from '../model/result-types.js';
-import {parsePersistedEvent, PersistedEvent} from './event-persist.js';
-import {AppEvent, AppEventMap} from './event.model.js';
 import {getEventsDirPath} from '../storage/paths.js';
+import {AppEvent, AppEventMap} from './event.model.js';
+import {parsePersistedEvent, PersistedEvent} from './event-persist.js';
 
 const EventFileNameSchema = z.object({
 	userId: z.string().min(1).default('unknown'),
@@ -120,6 +120,28 @@ export const fromPersistedEvent = (
 	);
 };
 
+const decodeReconstructedEvents = (
+	events: ReconstructedEvent[],
+): Result<AppEvent[]> => {
+	const decoded: AppEvent[] = [];
+
+	for (const entry of events) {
+		const eventResult = fromPersistedEvent(entry);
+
+		if (isFail(eventResult)) {
+			return failed(
+				`Failed to decode event ${entry.id?.[0] ?? '<unknown>'}: ${
+					eventResult.message
+				}`,
+			);
+		}
+
+		decoded.push(eventResult.value);
+	}
+
+	return succeeded('Decoded reconstructed events', decoded);
+};
+
 export const parsePersistedEventsFile = (
 	filePath: string,
 ): Result<ReconstructedEvent[]> => {
@@ -192,22 +214,41 @@ export function loadMergedEvents(stateBranchRoot: string): Result<AppEvent[]> {
 		return failed(allEvents.message);
 	}
 
-	const decoded: AppEvent[] = [];
+	return decodeReconstructedEvents(allEvents.value);
+}
 
-	for (const entry of allEvents.value) {
-		const eventResult = fromPersistedEvent(entry);
-		if (isFail(eventResult)) {
-			return failed(
-				`Failed to decode event ${entry.id?.[0] ?? '<unknown>'}: ${
-					eventResult.message
-				}`,
-			);
-		}
+export function loadMergedEventsBefore(
+	stateBranchRoot: string,
+	targetTime: number,
+): Result<{
+	appliedEvents: AppEvent[];
+	unappliedEvents: AppEvent[];
+}> {
+	const allEvents = loadAllPersistedEvents(stateBranchRoot);
 
-		decoded.push(eventResult.value);
+	if (isFail(allEvents)) {
+		return failed(allEvents.message);
 	}
 
-	return succeeded('Loaded merged events', decoded);
+	const {appliedEvents, unappliedEvents} = splitEventsAtTime(
+		allEvents.value,
+		targetTime,
+	);
+
+	const decodedAppliedEvents = decodeReconstructedEvents(appliedEvents);
+	if (isFail(decodedAppliedEvents)) {
+		return failed(decodedAppliedEvents.message);
+	}
+
+	const decodedUnappliedEvents = decodeReconstructedEvents(unappliedEvents);
+	if (isFail(decodedUnappliedEvents)) {
+		return failed(decodedUnappliedEvents.message);
+	}
+
+	return succeeded('Loaded merged events before time', {
+		appliedEvents: decodedAppliedEvents.value,
+		unappliedEvents: decodedUnappliedEvents.value,
+	});
 }
 
 export function getEdgeRef(rootDir = process.cwd()): Result<string | null> {
@@ -289,29 +330,38 @@ export const getSortedEvents = (
 };
 
 export const splitEventsAtTime = (
-	events: AppEvent[],
+	events: ReconstructedEvent[],
 	targetTime: number,
 ): {
-	appliedEvents: AppEvent[];
-	unappliedEvents: AppEvent[];
+	appliedEvents: ReconstructedEvent[];
+	unappliedEvents: ReconstructedEvent[];
 } => {
-	const cutoffIndex = events.findIndex(event => {
-		try {
-			return decodeTime(event.id) > targetTime;
-		} catch {
-			return true;
-		}
-	});
+	const unappliedIds = new Set<string>();
+	const appliedEvents: ReconstructedEvent[] = [];
+	const unappliedEvents: ReconstructedEvent[] = [];
 
-	if (cutoffIndex === -1) {
-		return {
-			appliedEvents: events,
-			unappliedEvents: [],
-		};
+	for (const event of events) {
+		const eventId = event.id[0];
+		const refId = event.id[1];
+
+		let shouldBeApplied = false;
+
+		try {
+			shouldBeApplied = decodeTime(eventId) < targetTime;
+		} catch {
+			shouldBeApplied = false;
+		}
+
+		if (!shouldBeApplied || (refId && unappliedIds.has(refId))) {
+			unappliedIds.add(eventId);
+			unappliedEvents.push(event);
+		} else {
+			appliedEvents.push(event);
+		}
 	}
 
 	return {
-		appliedEvents: events.slice(0, cutoffIndex),
-		unappliedEvents: events.slice(cutoffIndex),
+		appliedEvents,
+		unappliedEvents,
 	};
 };

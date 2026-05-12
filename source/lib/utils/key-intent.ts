@@ -48,6 +48,8 @@ export const Intent = {
 
 	// Editor
 	Edit: 'edit',
+	EditTitle: 'editTitle',
+	EditDescription: 'editDescription',
 
 	// View
 	SetViewDense: 'SetViewDense',
@@ -99,7 +101,7 @@ function mapDirectionalIntent(
 	},
 ): IntentInferred | null {
 	const enableAcrossContainers =
-		getState().currentNode.childNavigationAcrossParents;
+		getState().contextNode.childNavigationAcrossParents;
 	switch (dir) {
 		case 'up':
 			return axis === 'vertical'
@@ -165,8 +167,10 @@ export function getKeyIntent(
 
 	// Default actions
 	switch (key.name) {
+		case 'r':
+			return Intent.EditTitle;
 		case 'e':
-			return Intent.Edit;
+			return Intent.EditDescription;
 		case 'n':
 			return Intent.AddItem;
 		case 'm':
@@ -209,7 +213,7 @@ function normalizeIntent(
 			  };
 
 	return mapDirectionalIntent(
-		getState().currentNode.childRenderAxis,
+		getState().contextNode.childRenderAxis,
 		dir,
 		dirMap,
 	);
