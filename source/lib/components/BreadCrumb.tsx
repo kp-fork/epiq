@@ -1,29 +1,35 @@
 import {Box, Text} from 'ink';
 import React from 'react';
-import {findAncestor, isDescendantOf} from '../repository/node-repo.js';
+import {isSuccess} from '../model/result-types.js';
+import {
+	findAncestor,
+	isDescendantOf,
+	nodeRepo,
+} from '../repository/node-repo.js';
 import {getOrderedChildren} from '../repository/rank.js';
-import {getState} from '../state/state.js';
+import {useAppState} from '../state/state.js';
 import {theme} from '../theme/themes.js';
 import {AssigneeUI} from './Assignee.js';
 import {TagUI} from './Tag.js';
-import {isSuccess} from '../model/result-types.js';
 import {getSettingsState} from '../state/settings.state.js';
 
 type Props = {
 	width: number;
 };
 
-const truncate = (str: string, max: number) => {
-	if (str.length <= max) return str;
-	if (max <= 1) return '…';
-	return str.slice(0, max - 1) + '…';
-};
-
 export const Breadcrumb: React.FC<Props> = ({width}) => {
 	const {viewMode} = getSettingsState();
-	const {breadCrumb: crumbs, contextNode, selectedIndex} = getState();
+	const state = useAppState();
 
-	const selectedTarget = getOrderedChildren(contextNode.id)[selectedIndex];
+	const {
+		breadCrumb: crumbs,
+		contextNode,
+		selectedIndex,
+		renderedChildrenIndex,
+	} = state;
+
+	const selectedTarget = renderedChildrenIndex[contextNode.id]?.[selectedIndex];
+
 	const ticketResult = findAncestor(
 		selectedTarget?.id ?? contextNode.id,
 		'TICKET',
@@ -52,15 +58,31 @@ export const Breadcrumb: React.FC<Props> = ({width}) => {
 		})
 		.join('');
 
-	const truncated = truncate(breadcrumbString, width);
+	// Reserve width for metadata pills
+	const estimatedTagWidth =
+		tags.reduce(
+			(sum, tag) => sum + (nodeRepo.getTag(tag)?.name.length ?? 0) + 4,
+			0,
+		) +
+		assignees.reduce(
+			(sum, assignee) =>
+				sum + (nodeRepo.getContributor(assignee)?.name.length ?? 0) + 4,
+			0,
+		);
+
+	const breadcrumbWidth = width - estimatedTagWidth;
 
 	return (
-		<Box>
-			<Text color={theme.secondary2}>{truncated}</Text>
+		<Box overflow="hidden" justifyContent="flex-start" alignItems="flex-start">
+			<Box overflow="hidden" width={breadcrumbWidth}>
+				<Text wrap={'truncate-end'} color={theme.secondary2}>
+					{breadcrumbString}
+				</Text>
+			</Box>
 
 			{showDetails
 				? tags.map(tag => (
-						<Box key={tag} paddingLeft={2}>
+						<Box key={tag} paddingLeft={1}>
 							<TagUI id={tag} />
 						</Box>
 				  ))
@@ -68,7 +90,7 @@ export const Breadcrumb: React.FC<Props> = ({width}) => {
 
 			{showDetails
 				? assignees.map(assignee => (
-						<Box key={assignee} paddingLeft={2}>
+						<Box key={assignee} paddingLeft={1}>
 							<AssigneeUI id={assignee} />
 						</Box>
 				  ))
