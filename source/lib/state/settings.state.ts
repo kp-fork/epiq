@@ -1,3 +1,4 @@
+import {useSyncExternalStore} from 'react';
 import {ViewMode} from '../model/app-state.model.js';
 
 export type User = {
@@ -5,7 +6,10 @@ export type User = {
 	userName: string;
 };
 
+export type LogLevel = 'info' | 'error' | 'debug';
+
 export type SettingsState = {
+	logLevel: LogLevel;
 	autoSyncIntervalMs: number | null;
 	autoSync: boolean | null;
 	preferredEditor: string | null;
@@ -15,6 +19,7 @@ export type SettingsState = {
 };
 
 let settingsState: SettingsState = {
+	logLevel: 'info',
 	autoSyncIntervalMs: null,
 	autoSync: null,
 	preferredEditor: null,
@@ -23,7 +28,27 @@ let settingsState: SettingsState = {
 	viewMode: null,
 };
 
+const listeners = new Set<() => void>();
+
+const emit = () => {
+	for (const listener of listeners) {
+		listener();
+	}
+};
+
 export const getSettingsState = (): SettingsState => settingsState;
+
+export const useSettingsState = (): SettingsState =>
+	useSyncExternalStore(
+		callback => {
+			listeners.add(callback);
+
+			return () => {
+				listeners.delete(callback);
+			};
+		},
+		() => settingsState,
+	);
 
 export const patchSettingsState = (
 	patch: Partial<SettingsState>,
@@ -32,5 +57,8 @@ export const patchSettingsState = (
 		...settingsState,
 		...patch,
 	};
+
+	emit();
+
 	return settingsState;
 };
