@@ -5,6 +5,12 @@ import {
 	Result,
 	succeeded,
 } from '../../lib/model/result-types.js';
+import {NavNode} from '../../lib/model/navigation-node.model.js';
+import {AnyContext} from '../../lib/model/context.model.js';
+
+vi.mock('../../git/sync-and-reload-state.js', () => ({
+	syncAndReloadState: vi.fn(() => succeeded('Synced', true)),
+}));
 
 vi.mock('../../git/sync.js', () => ({
 	resetHardToRemoteState: vi.fn(() =>
@@ -23,7 +29,6 @@ vi.mock('../../git/sync.js', () => ({
 			bootstrapped: false,
 		}),
 	),
-	syncAndReloadState: vi.fn(() => succeeded('Synced', true)),
 }));
 
 vi.mock('../../lib/storage/paths.js', async importOriginal => {
@@ -98,7 +103,7 @@ vi.mock('../../lib/repository/rank.js', () => ({
 	}),
 }));
 
-const nodes: Record<string, any> = {
+const nodes: Record<string, Partial<NavNode<AnyContext>>> = {
 	'board-1': {
 		id: 'board-1',
 		title: 'Default',
@@ -151,27 +156,34 @@ const nodes: Record<string, any> = {
 	},
 };
 
-vi.mock('../../lib/state/state.js', () => ({
-	getSafeState: () => ({
-		status: 'success',
-		message: 'Resolved safe state',
-		value: {
-			nodes,
-			rootNodeId: 'workspace-1',
-			contextNode: nodes['swimlane-1'],
-			selectedIndex: 0,
-			eventLog: [],
-			syncStatus: {
-				status: 'synced',
-				msg: 'Synced',
+vi.mock('../../lib/state/state.js', async importOriginal => {
+	const actual = await importOriginal<
+		typeof import('../../lib/state/state.js')
+	>();
+
+	return {
+		...actual,
+		getSafeState: () => ({
+			status: 'success',
+			message: 'Resolved safe state',
+			value: {
+				nodes,
+				rootNodeId: 'workspace-1',
+				contextNode: nodes['swimlane-1'],
+				selectedIndex: 0,
+				eventLog: [],
+				syncStatus: {
+					status: 'synced',
+					msg: 'Synced',
+				},
 			},
-		},
-	}),
-	getRenderedChildren: (id: string) =>
-		Object.values(nodes).filter(
-			node => !node.isDeleted && node.parentNodeId === id,
-		),
-}));
+		}),
+		getRenderedChildren: (id: string) =>
+			Object.values(nodes).filter(
+				node => !node.isDeleted && node.parentNodeId === id,
+			),
+	};
+});
 
 vi.mock('../../lib/repository/node-repo.js', () => ({
 	nodeRepo: {

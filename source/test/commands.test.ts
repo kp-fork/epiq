@@ -53,10 +53,18 @@ import {ulid} from 'ulid';
 import {CmdIntent} from '../lib/command-line/command-intent.js';
 import {commands} from '../lib/command-line/commands.js';
 import {persistEvent} from '../lib/event/event-materialize-and-persist.js';
+import {EventAction, MaterializeResult} from '../lib/event/event.model.js';
+import {AppState, Tag} from '../lib/model/app-state.model.js';
+import {AnyContext, Ticket} from '../lib/model/context.model.js';
 import {failed, Result, succeeded} from '../lib/model/result-types.js';
 import {findAncestor} from '../lib/repository/node-repo.js';
-import {getCmdState} from '../lib/state/cmd.state.js';
+import {CommandLineState, getCmdState} from '../lib/state/cmd.state.js';
 import {getRenderedChildren, getState} from '../lib/state/state.js';
+import {NavNode} from '../lib/model/navigation-node.model.js';
+import {
+	CommandLineActionEntry,
+	CommandLineInput,
+} from '../lib/model/action-map.model.js';
 
 const mockedUlid = vi.mocked(ulid);
 const mockedPersistEvent = vi.mocked(persistEvent);
@@ -70,7 +78,7 @@ const assignCommand = commands.find(
 	x => x.intent === CmdIntent.AssignUserToTicket,
 )!;
 
-const ticket = {
+const ticket: Partial<Ticket> = {
 	id: 'ticket-1',
 	context: 'TICKET',
 	props: {
@@ -88,37 +96,40 @@ describe('TagTicket command', () => {
 				modifier: 'bug',
 				inputString: '',
 			},
-		} as any);
+		} as CommandLineState);
 
 		mockedGetState.mockReturnValue({
 			selectedNode: {id: 'selected-node'},
 			tags: {},
 			contributors: {},
-		} as any);
+		} as AppState);
 
 		mockedFindAncestor.mockReturnValue(
-			succeeded('Found ticket', ticket) as any,
+			succeeded('Found ticket', ticket) as Result<Ticket>,
 		);
 
-		mockedPersistEvent.mockReturnValue(
+		mockedPersistEvent.mockResolvedValue(
 			succeeded('Persisted event', {
 				result: {id: 'result-id'},
-			}) as any,
+			}) as MaterializeResult<EventAction>,
 		);
 	});
 
 	it('reuses an existing tag id and adds tag to issue props', async () => {
 		mockedGetState.mockReturnValue({
-			selectedNode: {id: 'selected-node'},
+			selectedNode: {id: 'selected-node'} as NavNode<AnyContext>,
 			tags: {
-				'tag-123': {id: 'tag-123', name: 'bug'},
+				'tag-123': {id: 'tag-123', name: 'bug'} as Tag,
 			},
 			contributors: {},
-		} as any);
+		} as Partial<AppState> as AppState);
 
 		mockedUlid.mockReturnValueOnce('add-tag-event-id');
 
-		await tagCommand.action({} as any, {} as any);
+		await tagCommand.action(
+			{} as CommandLineActionEntry,
+			{} as CommandLineInput,
+		);
 
 		expect(mockedUlid).toHaveBeenCalledTimes(1);
 		expect(mockedPersistEvent).toHaveBeenCalledTimes(1);
@@ -141,18 +152,21 @@ describe('TagTicket command', () => {
 			.mockReturnValueOnce('add-tag-event-id');
 
 		mockedPersistEvent
-			.mockReturnValueOnce(
+			.mockResolvedValueOnce(
 				succeeded('Created tag', {
 					result: {id: 'new-tag-id'},
-				}) as any,
+				}) as MaterializeResult<'create.tag'>,
 			)
-			.mockReturnValueOnce(
+			.mockResolvedValueOnce(
 				succeeded('Tagged issue', {
 					result: {tag: 'new-tag-id'},
-				}) as any,
+				}) as MaterializeResult<'add.issue.tag'>,
 			);
 
-		await tagCommand.action({} as any, {} as any);
+		await tagCommand.action(
+			{} as CommandLineActionEntry,
+			{} as CommandLineInput,
+		);
 
 		expect(mockedUlid).toHaveBeenCalledTimes(3);
 
@@ -181,23 +195,26 @@ describe('TagTicket command', () => {
 
 	it('tags the ticket id, not the selected child id', async () => {
 		mockedGetState.mockReturnValue({
-			selectedNode: {id: 'description-field-id'},
+			selectedNode: {id: 'description-field-id'} as NavNode<AnyContext>,
 			tags: {
 				'tag-123': {id: 'tag-123', name: 'bug'},
 			},
 			contributors: {},
-		} as any);
+		} as Partial<AppState> as AppState);
 
 		mockedFindAncestor.mockReturnValue(
 			succeeded('Found ticket', {
 				...ticket,
 				id: 'ticket-99',
-			}) as any,
+			}) as Result<Ticket>,
 		);
 
 		mockedUlid.mockReturnValueOnce('add-tag-event-id');
 
-		await tagCommand.action({} as any, {} as any);
+		await tagCommand.action(
+			{} as CommandLineActionEntry,
+			{} as CommandLineInput,
+		);
 
 		expect(mockedPersistEvent).toHaveBeenCalledWith({
 			id: 'add-tag-event-id',
@@ -213,12 +230,12 @@ describe('TagTicket command', () => {
 
 	it('fails and does not create duplicate tag', async () => {
 		mockedGetState.mockReturnValue({
-			selectedNode: {id: 'selected-node'},
+			selectedNode: {id: 'selected-node'} as NavNode<AnyContext>,
 			tags: {
-				'tag-123': {id: 'tag-123', name: 'bug'},
+				'tag-123': {id: 'tag-123', name: 'bug'} as Tag,
 			},
 			contributors: {},
-		} as any);
+		} as Partial<AppState> as AppState);
 
 		mockedFindAncestor.mockReturnValue(
 			succeeded('Found ticket', {
@@ -227,10 +244,13 @@ describe('TagTicket command', () => {
 					tags: ['tag-123'],
 					assignees: [],
 				},
-			}) as any,
+			}) as Result<Ticket>,
 		);
 
-		const result = await tagCommand.action({} as any, {} as any);
+		const result = await tagCommand.action(
+			{} as CommandLineActionEntry,
+			{} as CommandLineInput,
+		);
 
 		expect(result).toEqual(failed('Already tagged with that tag'));
 		expect(mockedPersistEvent).not.toHaveBeenCalled();
@@ -242,9 +262,12 @@ describe('TagTicket command', () => {
 			selectedNode: null,
 			tags: {},
 			contributors: {},
-		} as any);
+		} as Partial<AppState> as AppState);
 
-		const result = await tagCommand.action({} as any, {} as any);
+		const result = await tagCommand.action(
+			{} as CommandLineActionEntry,
+			{} as CommandLineInput,
+		);
 
 		expect(result).toEqual(failed('Invalid tag target'));
 		expect(mockedPersistEvent).not.toHaveBeenCalled();
@@ -261,44 +284,48 @@ describe('AssignUserToTicket command', () => {
 				modifier: 'alice',
 				inputString: '',
 			},
-		} as any);
+		} as CommandLineState);
 
 		mockedGetState.mockReturnValue({
 			selectedIndex: 0,
 			contextNode: {id: 'current-node'},
 			tags: {},
 			contributors: {},
-		} as any);
+		} as Partial<AppState> as AppState);
 
 		mockedFindAncestor.mockReturnValue(
-			succeeded('Found ticket', ticket) as any,
+			succeeded('Found ticket', ticket) as Result<Ticket>,
 		);
 
 		mockedGetRenderedChildren.mockImplementation((parentId: string) => {
-			if (parentId === 'current-node') return [{id: 'selected-node'}] as any;
-			return [] as any;
+			if (parentId === 'current-node')
+				return [{id: 'selected-node'}] as NavNode<AnyContext>[];
+			return [] as NavNode<AnyContext>[];
 		});
 
-		mockedPersistEvent.mockReturnValue(
+		mockedPersistEvent.mockResolvedValue(
 			succeeded('Persisted event', {
 				result: {id: 'result-id'},
-			}) as any,
+			}) as MaterializeResult<EventAction>,
 		);
 	});
 
 	it('reuses an existing contributor id and adds assignee to issue props', async () => {
 		mockedGetState.mockReturnValue({
 			selectedIndex: 0,
-			contextNode: {id: 'current-node'},
+			contextNode: {id: 'current-node'} as NavNode<AnyContext>,
 			tags: {},
 			contributors: {
 				'user-123': {id: 'user-123', name: 'alice'},
 			},
-		} as any);
+		} as Partial<AppState> as AppState);
 
 		mockedUlid.mockReturnValueOnce('add-assignee-event-id');
 
-		await assignCommand.action({} as any, {} as any);
+		await assignCommand.action(
+			{} as CommandLineActionEntry,
+			{} as CommandLineInput,
+		);
 
 		expect(mockedUlid).toHaveBeenCalledTimes(1);
 		expect(mockedPersistEvent).toHaveBeenCalledTimes(1);
@@ -321,18 +348,21 @@ describe('AssignUserToTicket command', () => {
 			.mockReturnValueOnce('add-assignee-event-id');
 
 		mockedPersistEvent
-			.mockReturnValueOnce(
+			.mockResolvedValueOnce(
 				succeeded('Created contributor', {
 					result: {id: 'new-contributor-id'},
-				}) as any,
+				}) as MaterializeResult<EventAction>,
 			)
-			.mockReturnValueOnce(
+			.mockResolvedValueOnce(
 				succeeded('Assigned issue', {
 					result: {assignee: 'new-contributor-id'},
-				}) as any,
+				}) as MaterializeResult<EventAction>,
 			);
 
-		await assignCommand.action({} as any, {} as any);
+		await assignCommand.action(
+			{} as CommandLineActionEntry,
+			{} as CommandLineInput,
+		);
 
 		expect(mockedUlid).toHaveBeenCalledTimes(3);
 
@@ -362,12 +392,12 @@ describe('AssignUserToTicket command', () => {
 	it('fails and does not create duplicate assignment', async () => {
 		mockedGetState.mockReturnValue({
 			selectedIndex: 0,
-			contextNode: {id: 'current-node'},
+			contextNode: {id: 'current-node'} as NavNode<AnyContext>,
 			tags: {},
 			contributors: {
 				'user-123': {id: 'user-123', name: 'alice'},
 			},
-		} as any);
+		} as Partial<AppState> as AppState);
 
 		mockedFindAncestor.mockReturnValue(
 			succeeded('Found ticket', {
@@ -376,10 +406,13 @@ describe('AssignUserToTicket command', () => {
 					tags: [],
 					assignees: ['user-123'],
 				},
-			}) as any,
+			}) as Result<Ticket>,
 		);
 
-		const result = await assignCommand.action({} as any, {} as any);
+		const result = await assignCommand.action(
+			{} as CommandLineActionEntry,
+			{} as CommandLineInput,
+		);
 
 		expect(result).toEqual(failed('Assignee already assigned'));
 		expect(mockedPersistEvent).not.toHaveBeenCalled();
@@ -388,11 +421,14 @@ describe('AssignUserToTicket command', () => {
 
 	it('fails when no selected node exists', async () => {
 		mockedGetRenderedChildren.mockImplementation((parentId: string) => {
-			if (parentId === 'current-node') return [] as any;
-			return [] as any;
+			if (parentId === 'current-node') return [] as NavNode<AnyContext>[];
+			return [] as NavNode<AnyContext>[];
 		});
 
-		const result = await assignCommand.action({} as any, {} as any);
+		const result = await assignCommand.action(
+			{} as CommandLineActionEntry,
+			{} as CommandLineInput,
+		);
 
 		expect(result).toEqual(failed('Invalid assign target'));
 		expect(mockedPersistEvent).not.toHaveBeenCalled();

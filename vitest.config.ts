@@ -7,5 +7,6 @@ export default defineConfig({
 			reporter: ['text-summary', 'html', 'lcov'],
 			reportsDirectory: './coverage',
 		},
+		testTimeout: 60_000,
 	},
 });

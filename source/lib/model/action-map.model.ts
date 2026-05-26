@@ -19,11 +19,11 @@ export type ActionEntry = {
 	action: (...args: [ActionEntry, readline.Key]) => Result | Promise<Result>;
 };
 
-export type ActionMap<T extends Record<string, any[]>> = {
+export type ActionMap<T extends Record<string, unknown[]>> = {
 	[K in keyof T]: ActionEntry[];
 };
 
-type CommandLineInput = Pick<
+export type CommandLineInput = Pick<
 	ParsedCommandLine,
 	'command' | 'modifier' | 'inputString'
 >;

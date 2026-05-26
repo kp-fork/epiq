@@ -141,11 +141,11 @@ const requireOneWithValueIn =
 	};
 
 const requireModifierOrInputStr =
-	({hint}: {hint: string}): Validator =>
+	({hint, onOk}: {hint: string; onOk?: string}): Validator =>
 	({modifier, inputString}) =>
 		isBlank(modifier) && isBlank(inputString)
 			? invalid({message: hint, completionWordList: []})
-			: valid(CONFIRM_MSG);
+			: valid(onOk ?? CONFIRM_MSG);
 
 const validateConfigCommand: Validator = ({modifier, inputString}) => {
 	const configModifiers = getCmdModifiers(CmdKeywords.CONFIG);
@@ -600,6 +600,31 @@ const validators: Record<CmdKeyword, Validator> = {
 	},
 
 	[CmdKeywords.SYNC]: () => valid(CONFIRM_MSG),
+	[CmdKeywords.COFFEE]: args => {
+		const {modifier} = args;
+		const modifiers = getCmdModifiers(CmdKeywords.COFFEE);
+
+		if (
+			modifier.length &&
+			modifier.length <= 1 &&
+			!modifiers.includes(modifier)
+		) {
+			return invalid({
+				message: hintDefault('enter an amount ... '),
+				completionWordList: modifiers.filter(x => x.startsWith(modifier)),
+			});
+		}
+
+		return requireModifierOrInputStr({
+			hint: buildOptionsHint({
+				prefix: 'Fuel continued development with ... ',
+				wordList: ['$1', ' $3 ', '$5', '$20', 'custom'],
+				inputString: '',
+				minLengthForHints: 0,
+			}),
+			onOk: 'Thank you for your support! 🫡',
+		})(args);
+	},
 };
 
 type CmdValidator = {

@@ -45,7 +45,7 @@ const event = <A extends AppEvent['action']>(
 		...actor,
 	} as Extract<AppEvent, {action: A}>);
 
-const expectOk = (result: any) => {
+const expectOk = (result: Result) => {
 	expect(isFail(result)).toBe(false);
 };
 
@@ -232,7 +232,7 @@ describe('event materialize', () => {
 				name: 'Bad actor',
 			}),
 			userId: '',
-		});
+		} satisfies AppEvent);
 
 		expect(isFail(result)).toBe(true);
 		if (isFail(result)) {

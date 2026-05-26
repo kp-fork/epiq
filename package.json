@@ -1,6 +1,6 @@
 {
 	"name": "epiq",
-	"version": "0.6.17",
+	"version": "0.6.18",
 	"license": "MIT",
 	"type": "module",
 	"description": "EPIQ - CLI based issue tracker",
@@ -16,9 +16,7 @@
 		"commandline",
 		"offline-first",
 		"git-based",
-		"local-first",
-		"developer-tools",
-		"vim-inspired"
+		"developer-tools"
 	],
 	"bin": {
 		"epiq": "dist/index.js",
@@ -38,7 +36,10 @@
 		"dev": "IS_LOCAL=true tsc --watch --noEmit",
 		"dev:start": "IS_LOCAL=true tsx source/Index.tsx",
 		"start": "IS_LOCAL=true tsx source/Index.tsx",
-		"test": "prettier --check \"**/*.{ts,tsx}\" && vitest run --coverage",
+		"test": "prettier --check \"**/*.{ts,tsx}\" && vitest run --coverage --exclude \"source/test/e2e/**\"",
+		"test:e2e:ci": "npm run build:npm && vitest run source/test/e2e",
+		"test:e2e": "docker run --rm -v \"$PWD\":/app -v /app/node_modules -w /app epiq-e2e npm run test:e2e:ci",
+		"build:e2e:image": "docker build -f source/test/e2e/Dockerfile -t epiq-e2e .",
 		"prepack": "npm run build:publish",
 		"pack:check": "rm -f epiq-*.tgz && npm pack && FILE=$(ls -t epiq-*.tgz | head -n 1) && echo \"$FILE\" && tar -tf \"$FILE\"",
 		"publish:dry": "rm -f epiq-*.tgz && npm pack && FILE=$(ls -t epiq-*.tgz | head -n 1) && npm publish --dry-run \"$FILE\"",
@@ -47,13 +48,15 @@
 		"start:mcp": "IS_LOCAL=true tsx source/mcp/server.ts",
 		"inspect:mcp": "npx @modelcontextprotocol/inspector",
 		"lint": "eslint .",
-		"lint:err": "eslint . --quiet"
+		"lint:err": "eslint . --quiet",
+		"prepare": "husky"
 	},
 	"files": [
 		"dist"
 	],
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.29.0",
+		"@xterm/headless": "^6.0.0",
 		"ink": "^6.8.0",
 		"meow": "^14.1.0",
 		"react": "^19.2.4",
@@ -76,6 +79,8 @@
 		"eslint": "^9.39.1",
 		"eslint-plugin-react": "^7.37.5",
 		"eslint-plugin-react-hooks": "^7.0.1",
+		"husky": "^9.1.7",
+		"node-pty": "^1.1.0",
 		"prettier": "^2.8.7",
 		"ts-node": "^10.9.1",
 		"tsx": "^4.20.3",

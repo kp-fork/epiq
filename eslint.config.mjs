@@ -3,7 +3,12 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
 	{
-		ignores: ['dist/**', 'coverage/**', 'node_modules/**'],
+		ignores: [
+			'dist/**',
+			'coverage/**',
+			'node_modules/**',
+			'source/scripts/*.mjs',
+		],
 	},
 
 	js.configs.recommended,
@@ -19,7 +24,7 @@ export default tseslint.config(
 		},
 		rules: {
 			'no-control-regex': 'off',
-			'no-useless-assignment': 'warn',
+			'no-useless-assignment': 'off',
 			'no-case-declarations': 'off',
 			'@typescript-eslint/no-unused-vars': 'off',
 			'@typescript-eslint/no-explicit-any': 'warn',
