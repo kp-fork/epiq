@@ -2,12 +2,16 @@ import {ulid} from 'ulid';
 import {exportBoardLayout} from '../../export/export.js';
 import {navigationUtils} from '../actions/default/navigation-action-utils.js';
 import {setConfig} from '../config/user-config.js';
-import {persistEvent} from '../event/event-materialize-and-persist.js';
+import {materializeAndPersistAll} from '../event/event-materialize-and-persist.js';
 import {resolveActorId} from '../event/event-persist.js';
 import {resolveReopenParentFromLog} from '../event/log-utils.js';
 import {CLOSED_SWIMLANE_ID} from '../event/static-ids.js';
 import {CommandLineActionEntry, Mode} from '../model/action-map.model.js';
-import {Filter} from '../model/app-state.model.js';
+import {
+	BreadCrumb,
+	Filter,
+	findInBreadCrumb,
+} from '../model/app-state.model.js';
 import {isTicketNode} from '../model/context.model.js';
 import {failed, isFail, succeeded} from '../model/result-types.js';
 import {findAncestor} from '../repository/node-repo.js';
@@ -25,11 +29,8 @@ import {getPersistRoot} from '../storage/paths.js';
 import {openUrl} from '../utils/open-in-browser.js';
 import {CmdKeywords} from './cmd-keywords.js';
 import {CmdIntent} from './command-intent.js';
-import {
-	ConfigModifiers,
-	EditModifiers,
-	getCmdModifiers,
-} from './command-modifiers.js';
+import {ConfigModifiers, getCmdModifiers} from './command-modifiers.js';
+import {MAX_COMMENT_LENGTH} from './command-validation.js';
 import {editCommand} from './commands/edit.cmd.js';
 import {initCommand} from './commands/init.cmd.js';
 import {moveCommand} from './commands/move.cmd.js';
@@ -39,6 +40,19 @@ import {setAutoSyncDurationCommand} from './commands/set-auto-sync-duration.cmd.
 import {setAutoSyncCommand} from './commands/set-auto-sync.cmd.js';
 import {setLogLevelCommand} from './commands/set-log-level.cmd.js';
 import {syncCommand} from './commands/sync.cmd.js';
+import {AppEvent} from '../event/event.model.js';
+
+const isAddIssueCommentEvent = (
+	event: AppEvent,
+): event is AppEvent & {
+	action: 'add.issue.comment';
+	payload: {
+		id: string;
+		issue: string;
+		author: string;
+		md: string;
+	};
+} => event.action === 'add.issue.comment';
 
 const findTagByName = (name: string) =>
 	Object.values(getState().tags).find(tag => tag.name === name);
@@ -47,6 +61,13 @@ const findContributorByName = (name: string) =>
 	Object.values(getState().contributors).find(
 		contributor => contributor.name === name,
 	);
+
+const getPersistRootValue = async () => {
+	const persistRootResult = await getPersistRoot();
+	if (isFail(persistRootResult)) return persistRootResult;
+
+	return succeeded('Resolved persist root', persistRootResult.value);
+};
 
 export const commands: CommandLineActionEntry[] = [
 	{
@@ -68,14 +89,63 @@ export const commands: CommandLineActionEntry[] = [
 			const child = getRenderedChildren(contextNode.id)[selectedIndex];
 			if (!child) return failed('Unable to resolve child to delete');
 
-			return persistEvent({
-				id: ulid(),
-				action: 'delete.node',
-				payload: {
-					id: child.id,
-				},
-				...userRes.value,
-			});
+			const persistRootResult = await getPersistRootValue();
+			if (isFail(persistRootResult)) return persistRootResult;
+
+			if (child.context === 'COMMENT') {
+				const commentId = child.id;
+
+				const issueId = isTicketNode(contextNode)
+					? contextNode.id
+					: contextNode.parentNodeId;
+
+				if (!issueId) return failed('Unable to resolve comment issue');
+
+				const ticket = getState().nodes[issueId];
+
+				if (!ticket || !isTicketNode(ticket)) {
+					return failed('Unable to resolve comment issue');
+				}
+
+				const commentEvent = ticket.log
+					?.filter(isAddIssueCommentEvent)
+					.find(event => event.payload.id === commentId);
+
+				if (!commentEvent) return failed('Unable to resolve comment');
+
+				if (commentEvent.payload.author !== userRes.value.userId) {
+					return failed('You can only delete your own comments');
+				}
+
+				return materializeAndPersistAll(
+					[
+						{
+							id: ulid(),
+							action: 'delete.issue.comment',
+							payload: {
+								id: commentId,
+								issue: issueId,
+							},
+							...userRes.value,
+						},
+					],
+					persistRootResult.value,
+				);
+			}
+
+			return materializeAndPersistAll(
+				[
+					{
+						id: ulid(),
+						action: 'delete.node',
+						payload: {
+							id: child.id,
+						},
+						...userRes.value,
+					},
+				],
+				persistRootResult.value,
+			);
 		},
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
@@ -150,7 +220,7 @@ export const commands: CommandLineActionEntry[] = [
 				return failed('Issue is already closed');
 			}
 
-			const persistRootResult = await getPersistRoot();
+			const persistRootResult = await getPersistRootValue();
 			if (isFail(persistRootResult)) return persistRootResult;
 			const persistRoot = persistRootResult.value;
 
@@ -163,16 +233,21 @@ export const commands: CommandLineActionEntry[] = [
 			);
 			if (isFail(rankResult)) return rankResult;
 
-			const result = await persistEvent({
-				id: ulid(),
-				action: 'close.issue',
-				payload: {
-					id: target.id,
-					parent: closeSwimlane.id,
-					rank: rankResult.value,
-				},
-				...userRes.value,
-			});
+			const result = materializeAndPersistAll(
+				[
+					{
+						id: ulid(),
+						action: 'close.issue',
+						payload: {
+							id: target.id,
+							parent: closeSwimlane.id,
+							rank: rankResult.value,
+						},
+						...userRes.value,
+					},
+				],
+				persistRoot,
+			);
 
 			if (isFail(result)) return result;
 
@@ -225,7 +300,7 @@ export const commands: CommandLineActionEntry[] = [
 			const previousParent = getState().nodes[previousParentId];
 			if (!previousParent) return failed('Previous parent no longer exists');
 
-			const persistRootResult = await getPersistRoot();
+			const persistRootResult = await getPersistRootValue();
 			if (isFail(persistRootResult)) return persistRootResult;
 			const persistRoot = persistRootResult.value;
 
@@ -238,16 +313,21 @@ export const commands: CommandLineActionEntry[] = [
 			);
 			if (isFail(rankResult)) return rankResult;
 
-			const result = await persistEvent({
-				id: ulid(),
-				action: 'reopen.issue',
-				payload: {
-					id: ticket.id,
-					parent: previousParent.id,
-					rank: rankResult.value,
-				},
-				...userRes.value,
-			});
+			const result = materializeAndPersistAll(
+				[
+					{
+						id: ulid(),
+						action: 'reopen.issue',
+						payload: {
+							id: ticket.id,
+							parent: previousParent.id,
+							rank: rankResult.value,
+						},
+						...userRes.value,
+					},
+				],
+				persistRoot,
+			);
 
 			if (isFail(result)) return result;
 
@@ -284,12 +364,20 @@ export const commands: CommandLineActionEntry[] = [
 			const newName = getCmdArg();
 			if (!newName) return failed('Provide a title');
 
-			return persistEvent({
-				id: ulid(),
-				action: 'edit.title',
-				payload: {id: node.id, name: newName},
-				...userRes.value,
-			});
+			const persistRootResult = await getPersistRootValue();
+			if (isFail(persistRootResult)) return persistRootResult;
+
+			return materializeAndPersistAll(
+				[
+					{
+						id: ulid(),
+						action: 'edit.title',
+						payload: {id: node.id, name: newName},
+						...userRes.value,
+					},
+				],
+				persistRootResult.value,
+			);
 		},
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
@@ -325,15 +413,23 @@ export const commands: CommandLineActionEntry[] = [
 				return failed('Issue is not tagged with that tag');
 			}
 
-			return persistEvent({
-				id: ulid(),
-				action: 'remove.issue.tag',
-				payload: {
-					id: ticket.id,
-					tag: existingTag.id,
-				},
-				...userRes.value,
-			});
+			const persistRootResult = await getPersistRootValue();
+			if (isFail(persistRootResult)) return persistRootResult;
+
+			return materializeAndPersistAll(
+				[
+					{
+						id: ulid(),
+						action: 'remove.issue.tag',
+						payload: {
+							id: ticket.id,
+							tag: existingTag.id,
+						},
+						...userRes.value,
+					},
+				],
+				persistRootResult.value,
+			);
 		},
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
@@ -360,27 +456,11 @@ export const commands: CommandLineActionEntry[] = [
 			const ticket = ticketResult.value;
 			if (!isTicketNode(ticket)) return failed('Target node is not issue');
 
+			const persistRootResult = await getPersistRootValue();
+			if (isFail(persistRootResult)) return persistRootResult;
+
 			const existingTag = findTagByName(name);
-
-			let tagId: string;
-
-			if (existingTag) {
-				tagId = existingTag.id;
-			} else {
-				const newTagId = ulid();
-				const createResult = await persistEvent({
-					id: ulid(),
-					action: 'create.tag',
-					payload: {
-						id: newTagId,
-						name,
-					},
-					...userRes.value,
-				});
-
-				if (isFail(createResult)) return createResult;
-				tagId = createResult.value.result.id;
-			}
+			const tagId = existingTag?.id ?? ulid();
 
 			const tags = ticket.props.tags ?? [];
 
@@ -388,15 +468,33 @@ export const commands: CommandLineActionEntry[] = [
 				return failed('Already tagged with that tag');
 			}
 
-			return persistEvent({
-				id: ulid(),
-				action: 'add.issue.tag',
-				payload: {
-					id: ticket.id,
-					tag: tagId,
-				},
-				...userRes.value,
-			});
+			return materializeAndPersistAll(
+				[
+					...(existingTag
+						? []
+						: [
+								{
+									id: ulid(),
+									action: 'create.tag' as const,
+									payload: {
+										id: tagId,
+										name,
+									},
+									...userRes.value,
+								},
+						  ]),
+					{
+						id: ulid(),
+						action: 'add.issue.tag',
+						payload: {
+							id: ticket.id,
+							tag: tagId,
+						},
+						...userRes.value,
+					},
+				],
+				persistRootResult.value,
+			);
 		},
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
@@ -424,27 +522,11 @@ export const commands: CommandLineActionEntry[] = [
 			const ticket = ticketResult.value;
 			if (!isTicketNode(ticket)) return failed('Target node is not issue');
 
+			const persistRootResult = await getPersistRootValue();
+			if (isFail(persistRootResult)) return persistRootResult;
+
 			const existingContributor = findContributorByName(name);
-
-			let contributorId: string;
-
-			if (existingContributor) {
-				contributorId = existingContributor.id;
-			} else {
-				const newContributorId = ulid();
-				const createResult = await persistEvent({
-					id: ulid(),
-					action: 'create.contributor',
-					payload: {
-						id: newContributorId,
-						name,
-					},
-					...userRes.value,
-				});
-
-				if (isFail(createResult)) return createResult;
-				contributorId = createResult.value.result.id;
-			}
+			const contributorId = existingContributor?.id ?? ulid();
 
 			const assignees = ticket.props.assignees ?? [];
 
@@ -452,15 +534,33 @@ export const commands: CommandLineActionEntry[] = [
 				return failed('Assignee already assigned');
 			}
 
-			return persistEvent({
-				id: ulid(),
-				action: 'add.issue.assignee',
-				payload: {
-					id: ticket.id,
-					assignee: contributorId,
-				},
-				...userRes.value,
-			});
+			return materializeAndPersistAll(
+				[
+					...(existingContributor
+						? []
+						: [
+								{
+									id: ulid(),
+									action: 'create.contributor' as const,
+									payload: {
+										id: contributorId,
+										name,
+									},
+									...userRes.value,
+								},
+						  ]),
+					{
+						id: ulid(),
+						action: 'add.issue.assignee',
+						payload: {
+							id: ticket.id,
+							assignee: contributorId,
+						},
+						...userRes.value,
+					},
+				],
+				persistRootResult.value,
+			);
 		},
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
@@ -498,15 +598,81 @@ export const commands: CommandLineActionEntry[] = [
 				return failed(`Issue is not assigned to "${name}"`);
 			}
 
-			return persistEvent({
-				id: ulid(),
-				action: 'remove.issue.assignee',
-				payload: {
-					id: ticket.id,
-					assignee: existingContributor.id,
-				},
-				...userRes.value,
-			});
+			const persistRootResult = await getPersistRootValue();
+			if (isFail(persistRootResult)) return persistRootResult;
+
+			return materializeAndPersistAll(
+				[
+					{
+						id: ulid(),
+						action: 'remove.issue.assignee',
+						payload: {
+							id: ticket.id,
+							assignee: existingContributor.id,
+						},
+						...userRes.value,
+					},
+				],
+				persistRootResult.value,
+			);
+		},
+		onSuccess: () => patchState({mode: Mode.DEFAULT}),
+	},
+	{
+		intent: CmdIntent.Comment,
+		description: 'Add a comment to the selected issue',
+		mode: Mode.COMMAND_LINE,
+		action: async (_, cmdState) => {
+			const md = cmdState.inputString.trim();
+			if (!md) return failed('Provide a comment');
+
+			if (md.length > MAX_COMMENT_LENGTH)
+				return failed(`Cannot exceed ${MAX_COMMENT_LENGTH} characters`);
+
+			const userRes = resolveActorId();
+			if (isFail(userRes)) return failed('Unable to resolve user ID');
+
+			const {breadCrumb, selectedNode} = getState();
+			const issueResult = findInBreadCrumb(
+				[...breadCrumb, selectedNode] as BreadCrumb,
+				'TICKET',
+			);
+			if (isFail(issueResult)) return failed('Edit target must be an issue');
+
+			const target = issueResult.value;
+			if (!target) return failed('Invalid comment target');
+
+			const ticketResult =
+				target.context === 'TICKET'
+					? succeeded('Resolved ticket', target)
+					: findAncestor(target.id, 'TICKET');
+
+			if (isFail(ticketResult)) {
+				return failed('Unable to comment on issue in this context');
+			}
+
+			const ticket = ticketResult.value;
+			if (!isTicketNode(ticket)) return failed('Target node is not issue');
+
+			const persistRootResult = await getPersistRootValue();
+			if (isFail(persistRootResult)) return persistRootResult;
+
+			return materializeAndPersistAll(
+				[
+					{
+						id: ulid(),
+						action: 'add.issue.comment',
+						payload: {
+							id: ulid(),
+							issue: ticket.id,
+							author: userRes.value.userId,
+							md,
+						},
+						...userRes.value,
+					},
+				],
+				persistRootResult.value,
+			);
 		},
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
@@ -550,33 +716,7 @@ export const commands: CommandLineActionEntry[] = [
 		intent: CmdIntent.Edit,
 		description: 'Edit title or description',
 		mode: Mode.COMMAND_LINE,
-		action: async (_, cmdState) => {
-			if (cmdState.modifier === EditModifiers.DESCRIPTION) {
-				return editCommand();
-			}
-
-			if (cmdState.modifier === EditModifiers.TITLE) {
-				const userRes = resolveActorId();
-				if (isFail(userRes)) return failed('Unable to resolve user ID');
-
-				const {contextNode, selectedIndex} = getState();
-				const node = getRenderedChildren(contextNode.id)[selectedIndex];
-				if (!node) return failed('Missing node');
-				if (node.readonly) return failed('Cannot rename readonly node');
-
-				const newName = cmdState.inputString.trim();
-				if (!newName) return failed('Provide a title');
-
-				return persistEvent({
-					id: ulid(),
-					action: 'edit.title',
-					payload: {id: node.id, name: newName},
-					...userRes.value,
-				});
-			}
-
-			return failed('Unknown edit command');
-		},
+		action: async (_, cmdState) => editCommand(cmdState),
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
 	{

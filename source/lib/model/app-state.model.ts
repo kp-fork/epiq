@@ -25,7 +25,7 @@ export type BreadCrumb =
 export type ViewMode = 'wide' | 'dense';
 
 export type Tag = {id: string; name: string};
-export type Contributor = {id: string; name: string};
+export type Contributor = {id: string; name: string; userId?: string};
 
 export type Filter = {
 	target: 'tag' | 'assignee' | 'description' | 'title';
@@ -64,6 +64,7 @@ export type AppState = {
 	timeMode: 'live' | 'peek' | 'replay';
 	eventLog: AppEvent[];
 	unappliedEvents: AppEvent[];
+	comments: Record<string, CommentState>;
 };
 
 type BreadCrumbItem = BreadCrumb[number];
@@ -81,4 +82,12 @@ export const findInBreadCrumb = <T extends BreadCrumbItem['context']>(
 	} else {
 		return failed('Unable to find node in breadcrumb');
 	}
+};
+export type CommentState = {
+	id: string;
+	issue: string;
+	authorId: string;
+	authorName: string;
+	md: string;
+	deleted?: boolean;
 };

@@ -1,4 +1,4 @@
-import {Contributor, Tag} from '../model/app-state.model.js';
+import {CommentState, Contributor, Tag} from '../model/app-state.model.js';
 import {AnyContext, isTicketNode} from '../model/context.model.js';
 import {NavNode} from '../model/navigation-node.model.js';
 import {
@@ -65,6 +65,38 @@ const failIfReadonly = (
 };
 
 export const nodeRepo = {
+	linkUserId({
+		contributorId,
+		userId,
+	}: {
+		contributorId: string;
+		userId: string;
+	}): Result<Contributor> {
+		const contributor = this.getContributor(contributorId);
+		if (!contributor) return failed('Contributor not found');
+
+		if (contributor.userId && contributor.userId !== userId) {
+			return failed('Contributor is already linked to another user');
+		}
+
+		const updatedContributor: Contributor = {
+			...contributor,
+			userId,
+		};
+
+		const result = updateState(s => ({
+			...s,
+			contributors: {
+				...s.contributors,
+				[contributorId]: updatedContributor,
+			},
+		}));
+
+		if (isFail(result)) return failed('Unable to link contributor to user');
+
+		return succeeded('Linked contributor to user', updatedContributor);
+	},
+
 	deleteNode(nodeId: string) {
 		updateState(s => {
 			const nextNodes = {...s.nodes};
@@ -74,6 +106,91 @@ export const nodeRepo = {
 				nodes: nextNodes,
 			};
 		});
+	},
+
+	createComment(comment: CommentState): Result<CommentState> {
+		const issue = this.getNode(comment.issue);
+
+		if (!issue) return failed('Unable to create comment, missing issue');
+		if (!isTicketNode(issue)) return failed('Can only comment on issues');
+
+		const result = updateState(s => ({
+			...s,
+			comments: {
+				...(s.comments ?? {}),
+				[comment.id]: {
+					...comment,
+					deleted: false,
+				},
+			},
+		}));
+
+		if (isFail(result)) return failed('Unable to create comment');
+
+		return succeeded('Created comment', {
+			...comment,
+			deleted: false,
+		});
+	},
+
+	editComment(commentId: string, md: string): Result<CommentState> {
+		const existing = this.getComment(commentId);
+		if (!existing) return failed('Unable to edit comment, missing comment');
+
+		const issue = this.getNode(existing.issue);
+
+		if (!issue) return failed('Unable to edit comment, missing issue');
+		if (!isTicketNode(issue)) return failed('Can only edit issue comments');
+
+		const updatedComment: CommentState = {
+			...existing,
+			md,
+			deleted: false,
+		};
+
+		const result = updateState(s => ({
+			...s,
+			comments: {
+				...(s.comments ?? {}),
+				[commentId]: updatedComment,
+			},
+		}));
+
+		if (isFail(result)) return failed('Unable to edit comment');
+
+		return succeeded('Edited comment', updatedComment);
+	},
+
+	deleteComment(commentId: string): Result<CommentState> {
+		const existing = this.getComment(commentId);
+		if (!existing) return failed('Unable to delete comment, missing comment');
+
+		const updatedComment: CommentState = {
+			...existing,
+			deleted: true,
+		};
+
+		const result = updateState(s => ({
+			...s,
+			comments: {
+				...(s.comments ?? {}),
+				[commentId]: updatedComment,
+			},
+		}));
+
+		if (isFail(result)) return failed('Unable to delete comment');
+
+		return succeeded('Deleted comment', updatedComment);
+	},
+
+	getComment(commentId: string): CommentState | undefined {
+		return getState().comments?.[commentId];
+	},
+
+	getCommentsByIssue(issueId: string): CommentState[] {
+		return Object.values(getState().comments ?? {}).filter(
+			comment => comment.issue === issueId && !comment.deleted,
+		);
 	},
 
 	editValue(targetId: string, md: string): Result<{md: string}> {
@@ -238,6 +355,7 @@ export const nodeRepo = {
 		if (readonlyFail) return readonlyFail;
 
 		if (!isTicketNode(target)) return failed('Target is not an issue');
+
 		const assignees = target.props.assignees ?? [];
 
 		if (assignees.includes(contributorId)) {

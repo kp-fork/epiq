@@ -126,6 +126,42 @@ export type AppEventMap = {
 		result: {md: string};
 	};
 
+	'add.issue.comment': {
+		payload: PayloadBase & {
+			issue: string;
+			author: string;
+			md: string;
+		};
+		result: {
+			id: string;
+			issue: string;
+			author: string;
+			md: string;
+		};
+	};
+
+	'edit.issue.comment': {
+		payload: PayloadBase & {
+			issue: string;
+			md: string;
+		};
+		result: {
+			id: string;
+			issue: string;
+			md: string;
+		};
+	};
+
+	'delete.issue.comment': {
+		payload: PayloadBase & {
+			issue: string;
+		};
+		result: {
+			id: string;
+			issue: string;
+		};
+	};
+
 	'close.issue': {
 		payload: PayloadBase & Position;
 		result: {id: string};
@@ -147,6 +183,16 @@ export type AppEventMap = {
 			ranks: Record<string, string>;
 		};
 		result: {parent: string};
+	};
+
+	'link.contributor.user': {
+		payload: {
+			contributor: string;
+		};
+		result: {
+			contributor: string;
+			userId: string;
+		};
 	};
 };
 

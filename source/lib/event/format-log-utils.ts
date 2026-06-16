@@ -28,6 +28,8 @@ const formatLogAction = (action: string): string => {
 		'remove.issue.tag': 'Removed tag',
 		'lock.node': 'Locked node',
 		'move.node': 'Moved issue',
+		'add.issue.comment': 'Commented',
+		'delete.issue.comment': 'Deleted comment',
 	};
 
 	return (

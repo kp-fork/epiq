@@ -14,13 +14,15 @@ import {
 import {AnyContext} from '../model/context.model.js';
 import {isFail} from '../model/result-types.js';
 import {nodeRepo} from '../repository/node-repo.js';
+import {setCmdInput} from '../state/cmd.state.js';
 import {getSettingsState, LogLevel} from '../state/settings.state.js';
 import {getState} from '../state/state.js';
-import {getDimStringColor, getGradientWord} from '../utils/color.js';
+import {getGradientWord, getStringColor} from '../utils/color.js';
 import {
 	ticketAssigneesFromBreadCrumb,
 	ticketTagsFromBreadCrumb,
 } from '../utils/ticket.utils.js';
+import {virtualNodeId} from '../virtual-nodes/virtual-ids.js';
 import {
 	buildOptionsHint,
 	hintAlert,
@@ -36,23 +38,32 @@ import {
 } from './command-modifiers.js';
 import {isDateWithinPeekHorizon, parsePeekDateInput} from './validate-date.js';
 
+export const MAX_COMMENT_LENGTH = 140 as const;
 const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE'];
-
 const guardBoardSwimlaneTicketNodes = (): ValidationResult => {
 	const target = getState().selectedNode;
+
 	if (!target?.context) {
 		return invalid({
 			message: hintDefault('Missing target context'),
 		});
 	}
 
-	if (!EDITABLE_NODES.includes(target.context)) {
-		return invalid({
-			message: hintDefault('Command not available in this context'),
-		});
+	if (EDITABLE_NODES.includes(target.context)) {
+		return valid();
 	}
 
-	return valid();
+	if (target.parentNodeId) {
+		const parent = getState().nodes[target.parentNodeId];
+
+		if (parent?.id === virtualNodeId(parent?.parentNodeId ?? '', 'comments')) {
+			return valid();
+		}
+	}
+
+	return invalid({
+		message: hintDefault('Command not available in this context'),
+	});
 };
 
 export const CONFIRM_MSG = '<ENTER> to confirm';
@@ -97,7 +108,7 @@ const invalid = ({
 const isBlank = (value: string) => value.length === 0;
 
 const chip = (value: string): string =>
-	` ${chalk.dim.bgHex(getDimStringColor(value))(` ${value} `)} `;
+	` ${chalk.hex('#000').bgHex(getStringColor(value))(` ${value} `)} `;
 
 const requireExact = ({modifier}: {modifier: string}) => {
 	const expected = 'confirm';
@@ -303,7 +314,7 @@ const validateConfigCommand: Validator = ({modifier, inputString}) => {
 	}
 };
 
-const validateEditCommand: Validator = ({modifier}) => {
+const validateEditCommand: Validator = ({modifier, inputString}) => {
 	const editModifiers = getCmdModifiers(CmdKeywords.EDIT);
 
 	if (!editModifiers.includes(modifier)) {
@@ -325,19 +336,31 @@ const validateEditCommand: Validator = ({modifier}) => {
 		[...breadCrumb, selectedNode] as BreadCrumb,
 		'TICKET',
 	);
-	if (!isTicketInPath)
+
+	if (isFail(isTicketInPath)) {
 		return invalid({
 			message: hintAlert('Command not available in this context'),
 		});
+	}
 
 	switch (modifier) {
+		case EditModifiers.COMMENT:
+			if (!inputString) {
+				setCmdInput(() => 'hahah');
+			}
+			return valid(CONFIRM_MSG);
+
 		case EditModifiers.TITLE:
 			return valid(CONFIRM_MSG);
 
-		case EditModifiers.DESCRIPTION:
+		case EditModifiers.DESCRIPTION: {
 			const {preferredEditor} = getSettingsState();
-			if (!preferredEditor) return invalid({message: 'No editor selected'});
+			if (!preferredEditor) {
+				return invalid({message: 'No editor selected'});
+			}
+
 			return valid(hintDefault('<ENTER> to edit in ') + preferredEditor);
+		}
 
 		default:
 			return invalid({
@@ -498,6 +521,23 @@ const validators: Record<CmdKeyword, Validator> = {
 
 	[CmdKeywords.EDIT]: validateEditCommand,
 
+	[CmdKeywords.COMMENT]: args => {
+		const result = requireModifierOrInputStr({
+			hint: hintDefault(`write a comment (max ${MAX_COMMENT_LENGTH} char)...`),
+			onOk: hintDefault(`(${args.inputString.length}/${MAX_COMMENT_LENGTH})`),
+		})(args);
+
+		if (result.validity === cmdValidity.Invalid) {
+			return result;
+		}
+
+		if (args.inputString.length > MAX_COMMENT_LENGTH) {
+			return valid(hintAlert(`max input exceeded`));
+		}
+
+		return result;
+	},
+
 	[CmdKeywords.CONFIG]: validateConfigCommand,
 
 	[CmdKeywords.DELETE]: args => {
@@ -617,8 +657,8 @@ const validators: Record<CmdKeyword, Validator> = {
 
 		return requireModifierOrInputStr({
 			hint: buildOptionsHint({
-				prefix: 'Fuel continued development with ... ',
-				wordList: ['$1', ' $3 ', '$5', '$20', 'custom'],
+				prefix: 'fuel continued development with ... $ ',
+				wordList: ['1', ' 3 ', '5', '20', 'custom'],
 				inputString: '',
 				minLengthForHints: 0,
 			}),

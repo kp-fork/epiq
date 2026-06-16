@@ -1,14 +1,14 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {AnyContext} from '../lib/model/context.model.js';
+import {NavNode} from '../lib/model/navigation-node.model.js';
 import {isFail, succeeded} from '../lib/model/result-types.js';
 import {rankBetween} from '../lib/utils/rank.js';
-import {NavNode} from '../lib/model/navigation-node.model.js';
-import {AnyContext} from '../lib/model/context.model.js';
+
+const materializeAndPersistAll = vi.hoisted(() => vi.fn());
 
 const state = vi.hoisted(() => ({
 	nodes: {} as Record<string, Partial<NavNode<AnyContext>>>,
 }));
-
-const materializeAndPersist = vi.hoisted(() => vi.fn());
 
 vi.mock('../lib/state/state.js', () => ({
 	getState: () => state,
@@ -26,7 +26,7 @@ vi.mock('../lib/event/create-rebalance-children-event.js', () => ({
 }));
 
 vi.mock('../lib/event/event-materialize-and-persist.js', () => ({
-	materializeAndPersist,
+	materializeAndPersistAll,
 }));
 
 describe('resolveAndPersistRankForMove', () => {
@@ -63,11 +63,16 @@ describe('resolveAndPersistRankForMove', () => {
 			},
 		};
 
-		materializeAndPersist.mockImplementation(() => {
+		materializeAndPersistAll.mockImplementation(() => {
 			state.nodes['child1']!.rank = '400000000000000000000000';
 			state.nodes['child2']!.rank = '800000000000000000000000';
 
-			return succeeded('Persisted rebalance event', undefined);
+			return succeeded('Persisted rebalance event', [
+				{
+					action: 'rebalance.children',
+					result: {parent: 'parent'},
+				},
+			]);
 		});
 
 		const {resolveAndPersistRankForMove} = await import(
@@ -95,11 +100,13 @@ describe('resolveAndPersistRankForMove', () => {
 			).toBeLessThan(0);
 		}
 
-		expect(materializeAndPersist).toHaveBeenCalledTimes(1);
-		expect(materializeAndPersist).toHaveBeenCalledWith(
-			expect.objectContaining({
-				action: 'rebalance.children',
-			}),
+		expect(materializeAndPersistAll).toHaveBeenCalledTimes(1);
+		expect(materializeAndPersistAll).toHaveBeenCalledWith(
+			[
+				expect.objectContaining({
+					action: 'rebalance.children',
+				}),
+			],
 			stateBranchRoot,
 		);
 	});

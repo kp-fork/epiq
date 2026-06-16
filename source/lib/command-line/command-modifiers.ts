@@ -15,7 +15,7 @@ import {
 import {CmdKeyword, CmdKeywords} from './cmd-keywords.js';
 import {generatePeekOffsetHints} from './validate-date.js';
 
-const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE'];
+const EDITABLE_NODES: AnyContext[] = ['BOARD', 'TICKET', 'SWIMLANE', 'COMMENT'];
 
 export const ConfigModifiers = {
 	EDITOR: 'editor',
@@ -32,6 +32,7 @@ export type ConfigModifier =
 export const EditModifiers = {
 	TITLE: 'title',
 	DESCRIPTION: 'description',
+	COMMENT: 'comment',
 } as const;
 
 export type EditModifier = (typeof EditModifiers)[keyof typeof EditModifiers];
@@ -45,7 +46,11 @@ export const CONFIG_MODIFIERS = [
 	ConfigModifiers.LOG_LEVEL,
 ];
 
-export const EDIT_MODIFIERS = [EditModifiers.TITLE, EditModifiers.DESCRIPTION];
+export const EDIT_MODIFIERS = [
+	EditModifiers.TITLE,
+	EditModifiers.DESCRIPTION,
+	EditModifiers.COMMENT,
+];
 
 export const AUTOSYNC_DEBOUNCE_HINTS = [
 	String(MIN_AUTOSYNC_DURATION_MS),
@@ -83,6 +88,7 @@ const TICKET_COMMANDS = [
 	CmdKeywords.CLOSE_ISSUE,
 	CmdKeywords.RE_OPEN_ISSUE,
 	CmdKeywords.EDIT,
+	CmdKeywords.COMMENT,
 ];
 
 const PRESENTATION_COMMANDS = [CmdKeywords.FILTER, CmdKeywords.PEEK];
@@ -95,6 +101,7 @@ const COMMANDS_BY_CONTEXT: CommandMap = {
 	FIELD: [...GLOBAL_COMMANDS, ...TICKET_COMMANDS],
 	FIELD_LIST: [...GLOBAL_COMMANDS, ...TICKET_COMMANDS],
 	TEXT: [...GLOBAL_COMMANDS],
+	COMMENT: [CmdKeywords.EDIT, CmdKeywords.DELETE],
 };
 
 const getNewModifiers = (context: AnyContext): string[] => {
@@ -184,6 +191,8 @@ export const getCmdModifiers = (
 		[CmdKeywords.PEEK]: [...generatePeekOffsetHints(), 'now', 'prev', 'next'],
 
 		[CmdKeywords.EDIT]: [...EDIT_MODIFIERS],
+
+		[CmdKeywords.COMMENT]: [],
 
 		[CmdKeywords.DELETE]: ['confirm'],
 		[CmdKeywords.RE_OPEN_ISSUE]: ['confirm'],
