@@ -27,19 +27,6 @@ An easy to use browser GUI is available, powered by the same Git-backed state en
 ![Epiq cli kanban view](https://raw.githubusercontent.com/ljtn/epiq/main/source/assets/overview.png)
 ![Epiq cli log view](https://raw.githubusercontent.com/ljtn/epiq/main/source/assets/log.png)
 
-## Features
-
-- Issue tracking — track work in tickets with name, description, tags, assignees, history log, etc.
-- Ergonomics — fast keyboard-driven UX, command line with history, syntax highlighting etc.
-- Command palette — press `?` to open a scrollable overview of all available commands and descriptions
-- Time travel — inspect your app 1h, 1 week or 1 year ago
-- Filtering — query issues by description, tags, assignees, etc.
-- Autocompletion — minimize typing, stay in flow, reuse previous commands
-- Multi-user — collaborative synchronization via Git
-- Traceable event log — state is a full history of every change ever made
-- Browser GUI — graphical interface powered by the same Git-backed state
-- MCP integration — Model Context Protocol support for agent interaction
-
 ## Why Epiq?
 
 Most issue trackers live outside your workflow. Epiq brings issue tracking where you already work - you editor.
@@ -53,6 +40,19 @@ These design choices result in a system that is:
 - **Portable** — run on your local machine, on a remote Linux server or your grandma’s connected toaster
 - **Command driven** — scriptable and automation-friendly, ready for the agentic era
 - **Versioned** — changes are tracked and recoverable through Git
+
+## Features
+
+- Issue tracking — track work in tickets with name, description, tags, assignees, history log, etc.
+- Ergonomics — fast keyboard-driven UX, command line with history, syntax highlighting etc.
+- Command palette — press `?` to open a scrollable overview of all available commands and descriptions
+- Time travel — inspect your app 1h, 1 week or 1 year ago
+- Filtering — query issues by description, tags, assignees, etc.
+- Autocompletion — minimize typing, stay in flow, reuse previous commands
+- Multi-user — collaborative synchronization via Git
+- Traceable event log — state is a full history of every change ever made
+- Browser GUI — graphical interface powered by the same Git-backed state
+- MCP integration — Model Context Protocol support for agent interaction
 
 ---
 
@@ -88,15 +88,15 @@ Git init
 epiq
 ```
 
-If you prefer the browser user interface:
+If it is your first run, this opens the interactive setup wizard that sets you up in about 30 seconds.
+
+That’s it!
+
+Once your project is set up, you can also launch the browser user interface with:
 
 ```bash
 epiq gui
 ```
-
-If it is your first run, this opens the interactive setup wizard that sets you up in about 30 seconds.
-
-That’s it!
 
 > Setup wizard creates:
 > User config persisted in `~/.epiq-global/config.json`.
@@ -108,7 +108,7 @@ That’s it!
 > - Updates your `.gitignore` to ignore local-only `.epiq/log/`
 >   Epiq manages a dedicated Git state branch and worktree automatically as the source of truth for synchronization.
 
-## Usage Guide
+## Usage Guide (TUI)
 
 ### Help
 
@@ -128,6 +128,10 @@ That’s it!
 ### Create nodes: issue | swimlane | board
 
 - Create nodes with `:new issue|swimlane|board <Name of new node>`.
+
+### Comment
+
+- Comment on issues with `:comment <your-input>`. Comments can be edited or deleted with the regular ':edit ...' or ':delete' commands.
 
 ### Move nodes
 
@@ -226,4 +230,4 @@ Epiq follows a **local-first** model:
 
 ---
 
-🫡 Project management for people who live in the terminal.
+🫡 Project management for people who live in the terminal. And everyone else!
