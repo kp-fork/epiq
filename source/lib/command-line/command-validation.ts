@@ -6,15 +6,10 @@ import {
 import {booleanToYesNo, YesNo} from '../config/setup-utils.js';
 import {editorConfig} from '../editor/editor-config.js';
 import {safeDateFromUlid} from '../event/date-utils.js';
-import {
-	BreadCrumb,
-	Filter,
-	findInBreadCrumb,
-} from '../model/app-state.model.js';
+import {Filter, findInBreadCrumb} from '../model/app-state.model.js';
 import {AnyContext} from '../model/context.model.js';
 import {isFail} from '../model/result-types.js';
 import {nodeRepo} from '../repository/node-repo.js';
-import {setCmdInput} from '../state/cmd.state.js';
 import {getSettingsState, LogLevel} from '../state/settings.state.js';
 import {getState} from '../state/state.js';
 import {getGradientWord, getStringColor} from '../utils/color.js';
@@ -317,6 +312,12 @@ const validateConfigCommand: Validator = ({modifier, inputString}) => {
 const validateEditCommand: Validator = ({modifier, inputString}) => {
 	const editModifiers = getCmdModifiers(CmdKeywords.EDIT);
 
+	if (!editModifiers.length) {
+		return invalid({
+			message: hintAlert('Command not available in this context'),
+		});
+	}
+
 	if (!editModifiers.includes(modifier)) {
 		const message = buildOptionsHint({
 			prefix: 'edit... ',
@@ -331,22 +332,12 @@ const validateEditCommand: Validator = ({modifier, inputString}) => {
 		});
 	}
 
-	const {breadCrumb, selectedNode} = getState();
-	const isTicketInPath = findInBreadCrumb(
-		[...breadCrumb, selectedNode] as BreadCrumb,
-		'TICKET',
-	);
-
-	if (isFail(isTicketInPath)) {
-		return invalid({
-			message: hintAlert('Command not available in this context'),
-		});
-	}
-
 	switch (modifier) {
 		case EditModifiers.COMMENT:
-			if (!inputString) {
-				setCmdInput(() => 'hahah');
+			if (!inputString.trim()) {
+				return invalid({
+					message: hintDefault('write a comment...'),
+				});
 			}
 			return valid(CONFIRM_MSG);
 
@@ -390,9 +381,12 @@ const validators: Record<CmdKeyword, Validator> = {
 		if (modifier === 'prev') return valid(CONFIRM_MSG);
 		if (modifier === 'next') return valid(CONFIRM_MSG);
 
-		const date = parsePeekDateInput(modifier);
+		// Offsets (e.g. `2y`) arrive as `modifier`; absolute dates (YYYY-MM-DD) are
+		// not in the modifier allow-list, so they arrive as `inputString`.
+		const target = modifier || args.inputString;
+		const date = parsePeekDateInput(target);
 
-		if (!modifier) return invalid(hint);
+		if (!target) return invalid(hint);
 		if (!date) return invalid(hint);
 
 		const boardResult = findInBreadCrumb(getState().breadCrumb, 'BOARD');
@@ -436,7 +430,7 @@ const validators: Record<CmdKeyword, Validator> = {
 	[CmdKeywords.PALETTE]: () => valid(CONFIRM_MSG),
 
 	[CmdKeywords.FILTER]: args => {
-		if (args.modifier === 'clear') return valid();
+		if (args.modifier === 'clear') return valid(CONFIRM_MSG);
 
 		const isValidModifier = (val: string): val is Filter['target'] =>
 			getCmdModifiers(CmdKeywords.FILTER).includes(val);
@@ -471,6 +465,7 @@ const validators: Record<CmdKeyword, Validator> = {
 					wordList,
 					noOfHints: 10,
 					inputString: args.inputString,
+					minLengthForHints: 0,
 				}),
 				completionWordList: wordList,
 			});
@@ -483,6 +478,7 @@ const validators: Record<CmdKeyword, Validator> = {
 					wordList,
 					noOfHints: 10,
 					inputString: args.inputString,
+					minLengthForHints: 0,
 				}),
 				completionWordList: wordList,
 			});

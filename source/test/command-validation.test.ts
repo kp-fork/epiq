@@ -5,6 +5,7 @@ import {
 	ConfigModifiers,
 	EditModifiers,
 	getCmdModifiers,
+	getEditModifiers,
 } from '../lib/command-line/command-modifiers.js';
 
 vi.mock('../lib/state/state.js', () => ({
@@ -177,6 +178,39 @@ describe('cmdValidation', () => {
 
 			expect(result.validity).toBe(cmdValidity.Invalid);
 			expect(result.message).toBe('Unknown edit option');
+		});
+	});
+
+	describe('getEditModifiers', () => {
+		it('offers only title for swimlanes', () => {
+			expect(getEditModifiers('SWIMLANE')).toEqual([EditModifiers.TITLE]);
+		});
+
+		it('offers only title for boards', () => {
+			expect(getEditModifiers('BOARD')).toEqual([EditModifiers.TITLE]);
+		});
+
+		it('offers title and description for tickets', () => {
+			expect(getEditModifiers('TICKET')).toEqual([
+				EditModifiers.TITLE,
+				EditModifiers.DESCRIPTION,
+			]);
+		});
+
+		it('offers only comment for comments', () => {
+			expect(getEditModifiers('COMMENT')).toEqual([EditModifiers.COMMENT]);
+		});
+
+		it('offers nothing for non-editable contexts', () => {
+			expect(getEditModifiers('FIELD')).toEqual([]);
+		});
+
+		it('falls back to the selected node context when omitted', () => {
+			// getState() mock selects a TICKET
+			expect(getEditModifiers()).toEqual([
+				EditModifiers.TITLE,
+				EditModifiers.DESCRIPTION,
+			]);
 		});
 	});
 
@@ -372,6 +406,35 @@ describe('cmdValidation', () => {
 
 			expect(result.validity).toBe(cmdValidity.Valid);
 			expect(result.message).toBe('<ENTER> to confirm');
+		});
+	});
+
+	describe('PEEK', () => {
+		it('rejects an empty target with the input-format hint', () => {
+			const result = cmdValidation[CmdKeywords.PEEK].validate(
+				CmdKeywords.PEEK,
+				'',
+				'',
+			);
+
+			expect(result.validity).toBe(cmdValidity.Invalid);
+			expect(result.message).toContain('historical state from');
+		});
+
+		it('recognizes a full date supplied via inputString', () => {
+			// Absolute dates (YYYY-MM-DD) are not in the modifier allow-list, so the
+			// parser surfaces them as `inputString`. They must still be accepted as a
+			// valid peek target rather than rejected as unrecognized input. (With no
+			// board in the breadcrumb the validator then stops at the context check,
+			// which proves the date itself was parsed and accepted.)
+			const result = cmdValidation[CmdKeywords.PEEK].validate(
+				CmdKeywords.PEEK,
+				'',
+				'2027-06-19',
+			);
+
+			expect(result.message).not.toContain('historical state from');
+			expect(result.message).toContain('not applicable in this context');
 		});
 	});
 });

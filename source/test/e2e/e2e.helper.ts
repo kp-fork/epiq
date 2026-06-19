@@ -42,7 +42,7 @@ type TuiSession = {
 	destroy: () => void;
 };
 
-const createTuiEnv = () => {
+const createTuiEnv = (extra: Record<string, string> = {}) => {
 	const env = {...process.env};
 
 	delete env['CI'];
@@ -52,14 +52,30 @@ const createTuiEnv = () => {
 		...env,
 		TERM: 'xterm-256color',
 		FORCE_COLOR: '1',
+		...extra,
 	};
 };
 
 const sleep = async (ms: number) =>
 	await new Promise(resolve => setTimeout(resolve, ms));
 
-export const setupTui = (args: string[] = []): TuiSession => {
-	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'epiq-e2e-'));
+type SetupTuiOptions = {
+	/**
+	 * The caller owns the directory: it is left in place on
+	 * `destroy()` so a follow-up session can replay the persisted event log.
+	 */
+	cwd?: string;
+	/** Extra environment variables for the spawned process (e.g. EDITOR). */
+	env?: Record<string, string>;
+};
+
+export const setupTui = (
+	args: string[] = [],
+	options: SetupTuiOptions = {},
+): TuiSession => {
+	const ownsCwd = options.cwd === undefined;
+	const cwd =
+		options.cwd ?? fs.mkdtempSync(path.join(os.tmpdir(), 'epiq-e2e-'));
 	const cliPath = path.resolve(process.cwd(), 'dist/index.js');
 
 	let destroyed = false;
@@ -77,7 +93,7 @@ export const setupTui = (args: string[] = []): TuiSession => {
 		cols: width,
 		rows: height,
 		cwd,
-		env: createTuiEnv(),
+		env: createTuiEnv(options.env),
 	});
 
 	const renderOutput = () => {
@@ -131,7 +147,9 @@ export const setupTui = (args: string[] = []): TuiSession => {
 			// noop
 		}
 
-		fs.rmSync(cwd, {recursive: true, force: true});
+		if (ownsCwd) {
+			fs.rmSync(cwd, {recursive: true, force: true});
+		}
 	};
 
 	return {
