@@ -1,5 +1,6 @@
 import readline from 'readline';
 import {navigationUtils} from '../actions/default/navigation-action-utils.js';
+import {Mode} from '../model/action-map.model.js';
 import {getState} from '../state/state.js';
 import {getKeyIntent, IntentInferred, Intent} from '../utils/key-intent.js';
 
@@ -36,16 +37,47 @@ const AVAILABLE_IN_READ_ONLY = new Set<IntentInferred>([
 	Intent.AutoCompleteCommand,
 ]);
 
+// Disabled while a replay is playing so the board stays a locked "cinema" view
+const REPLAY_BLOCKED_INTENTS = new Set<IntentInferred>([
+	Intent.NavPreviousItem,
+	Intent.NavNextItem,
+	Intent.NavToPreviousContainer,
+	Intent.NavToNextContainer,
+	Intent.Confirm,
+	Intent.Exit,
+	Intent.InitCommandPalette,
+	Intent.InitMove,
+	Intent.MoveNextItem,
+	Intent.MovePreviousItem,
+	Intent.MoveToNextContainer,
+	Intent.MoveToPreviousContainer,
+	Intent.Delete,
+	Intent.AddItem,
+	Intent.EditTitle,
+	Intent.EditDescription,
+	Intent.ConfirmMove,
+	Intent.Edit,
+	Intent.ViewHelp,
+]);
+
 const triggerAction = async (key: readline.Key) => {
 	if (key.ctrl && key.name === 'c') {
 		return navigationUtils.exit();
 	}
 
-	const {actionIndex, mode, readOnly} = getState();
+	const {actionIndex, mode, readOnly, timeMode} = getState();
 	const intent = getKeyIntent(key, mode);
 	if (!intent) return;
 
 	if (readOnly && !AVAILABLE_IN_READ_ONLY.has(intent)) {
+		return;
+	}
+
+	if (
+		timeMode === 'replay' &&
+		mode === Mode.DEFAULT &&
+		REPLAY_BLOCKED_INTENTS.has(intent)
+	) {
 		return;
 	}
 

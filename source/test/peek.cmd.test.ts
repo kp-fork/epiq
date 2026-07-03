@@ -38,6 +38,11 @@ vi.mock('../lib/command-line/validate-date.js', () => ({
 	parsePeekDateInput: vi.fn(),
 }));
 
+vi.mock('../lib/command-line/commands/replay-engine.js', () => ({
+	cancelActiveReplay: vi.fn(),
+	startReplay: vi.fn(),
+}));
+
 import {getRepoRootDir, getStateBranchRoot} from '../git/git-storage.js';
 
 import {navigationUtils} from '../lib/actions/default/navigation-action-utils.js';
@@ -122,6 +127,7 @@ describe('peekCommand', () => {
 			readOnly: false,
 			timeMode: 'live',
 			unappliedEvents: [],
+			replay: null,
 		});
 
 		if (isFail(result)) return result;
@@ -156,6 +162,7 @@ describe('peekCommand', () => {
 			readOnly: true,
 			timeMode: 'peek',
 			unappliedEvents: [{id: '2'}],
+			replay: null,
 		});
 
 		expect(navigationUtils.navigate).toHaveBeenCalled();
@@ -192,6 +199,7 @@ describe('peekCommand', () => {
 			readOnly: true,
 			timeMode: 'peek',
 			unappliedEvents: [],
+			replay: null,
 		});
 
 		expect(isSuccess(result)).toBe(true);
@@ -341,7 +349,7 @@ describe('peekCommand', () => {
 		expect(isSuccess(result)).toBe(false);
 
 		if (isFail(result)) {
-			expect(result.message).toContain('Board did not exist at peek date');
+			expect(result.message).toContain('Board did not exist at that date');
 		}
 	});
 

@@ -1,10 +1,6 @@
 import {getRepoRootDir, getStateBranchRoot} from '../../../git/git-storage.js';
-import {navigationUtils} from '../../actions/default/navigation-action-utils.js';
 import {getEventTime} from '../../event/date-utils.js';
-import {
-	loadMergedEvents,
-	loadMergedEventsBefore,
-} from '../../event/event-load.js';
+import {loadMergedEvents} from '../../event/event-load.js';
 import {materializeAll} from '../../event/event-materialize.js';
 import {Mode} from '../../model/action-map.model.js';
 import {findInBreadCrumb} from '../../model/app-state.model.js';
@@ -12,6 +8,8 @@ import {failed, isFail, succeeded} from '../../model/result-types.js';
 import {getCmdState} from '../../state/cmd.state.js';
 import {getState, patchState, resetState} from '../../state/state.js';
 import {parsePeekDateInput} from '../validate-date.js';
+import {checkoutBoardAt} from './checkout-board.js';
+import {cancelActiveReplay} from './replay-engine.js';
 
 export const peekCommand = async () => {
 	const boardNodeResult = findInBreadCrumb(getState().breadCrumb, 'BOARD');
@@ -24,9 +22,13 @@ export const peekCommand = async () => {
 		repoRoot: repoRootResult.value,
 	});
 
-	if (isFail(stateBranchRoot)) throw new Error(stateBranchRoot.message);
+	if (isFail(stateBranchRoot)) return stateBranchRoot;
 
 	const {modifier, inputString} = getCmdState().commandMeta;
+
+	// Any new peek command supersedes a replay in progress, so always tear down
+	// the running movie before doing anything else.
+	cancelActiveReplay();
 
 	if (modifier === 'now') {
 		const eventsResult = loadMergedEvents(stateBranchRoot.value);
@@ -47,6 +49,7 @@ export const peekCommand = async () => {
 			readOnly: false,
 			timeMode: 'live',
 			unappliedEvents: [],
+			replay: null,
 		});
 
 		return succeeded('Peeking now', true);
@@ -71,7 +74,7 @@ export const peekCommand = async () => {
 	} else {
 		// Offsets (e.g. `2y`) arrive as `modifier`; absolute dates (YYYY-MM-DD)
 		// are not in the modifier allow-list, so they arrive as `inputString`.
-		const targetDate = parsePeekDateInput(modifier || inputString);
+		const targetDate = parsePeekDateInput(modifier || inputString.trim());
 
 		if (!targetDate) {
 			return failed('Invalid peek date');
@@ -80,52 +83,21 @@ export const peekCommand = async () => {
 		targetTime = targetDate.getTime();
 	}
 
-	const previousState = getState();
-	const boardId = boardNodeResult.value.id;
-
-	const eventsBeforeResult = loadMergedEventsBefore(
-		stateBranchRoot.value,
+	const checkoutResult = checkoutBoardAt({
+		boardId: boardNodeResult.value.id,
 		targetTime,
-	);
-
-	if (isFail(eventsBeforeResult)) {
-		return failed(eventsBeforeResult.message);
-	}
-
-	const {appliedEvents, unappliedEvents} = eventsBeforeResult.value;
-
-	const resetResult = resetState();
-	if (isFail(resetResult)) return resetResult;
-
-	const materializeResult = materializeAll(appliedEvents);
-	const materializeFailures = materializeResult.filter(isFail);
-
-	if (materializeFailures.length > 0) {
-		resetState();
-		patchState(previousState);
-
-		return failed(materializeFailures.map(x => x.message).join(', '));
-	}
-
-	const boardNode = getState().nodes[boardId];
-
-	if (!boardNode) {
-		resetState();
-		patchState(previousState);
-
-		return failed('Board did not exist at peek date');
-	}
-
-	navigationUtils.navigate({
-		contextNode: boardNode,
+		stateBranchRoot: stateBranchRoot.value,
 		selectedIndex: 0,
 	});
+
+	if (isFail(checkoutResult)) return checkoutResult;
 
 	patchState({
 		mode: Mode.DEFAULT,
 		readOnly: true,
 		timeMode: 'peek',
-		unappliedEvents,
+		unappliedEvents: checkoutResult.value.unappliedEvents,
+		replay: null,
 	});
 
 	return succeeded('Peeking', true);
