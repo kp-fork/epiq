@@ -16,6 +16,7 @@ export type ApiComment = {
 
 export type ApiIssue = {
 	id: string;
+	ref: string;
 	title: string;
 	description: string;
 	readonly: boolean;
@@ -35,6 +36,7 @@ export type ApiSwimlane = {
 
 export type ApiBoard = {
 	id: string;
+	ref: string;
 	title: string;
 	swimlanes: ApiSwimlane[];
 };

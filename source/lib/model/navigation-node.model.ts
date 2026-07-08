@@ -4,9 +4,16 @@ import {AnyContext} from './context.model.js';
 export type EmptyProps = Record<string, never>;
 
 export type TicketProps = {
+	// Shorthand reference derived from the ULID tail
+	ref?: string;
 	description?: string;
 	assignees?: string[];
 	tags?: string[];
+};
+
+export type BoardProps = {
+	// Shorthand reference derived from the ULID tail
+	ref?: string;
 };
 
 export type FieldProps = {
@@ -20,7 +27,7 @@ export type TextProps = {
 
 export type NavNodePropsMap = {
 	WORKSPACE: EmptyProps;
-	BOARD: EmptyProps;
+	BOARD: BoardProps;
 	SWIMLANE: EmptyProps;
 	TICKET: TicketProps;
 	FIELD: FieldProps;
