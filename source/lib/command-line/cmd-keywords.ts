@@ -24,6 +24,7 @@ export const CmdKeywords = {
 
 	CONFIG: 'config',
 	EDIT: 'edit',
+	YANK: 'yank',
 
 	// Git
 	SYNC: 'sync',

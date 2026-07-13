@@ -409,6 +409,30 @@ const validateEditCommand: Validator = ({modifier, inputString}) => {
 	}
 };
 
+const validateYankCommand: Validator = ({modifier}) => {
+	const copyModifiers = getCmdModifiers(CmdKeywords.YANK);
+
+	if (!copyModifiers.length) {
+		return invalid({
+			message: hintAlert('Nothing selected to copy from'),
+		});
+	}
+
+	if (!copyModifiers.includes(modifier)) {
+		return invalid({
+			message: buildOptionsHint({
+				prefix: 'yank... ',
+				wordList: copyModifiers,
+				inputString: modifier,
+				minLengthForHints: 0,
+			}),
+			completionWordList: copyModifiers,
+		});
+	}
+
+	return valid(CONFIRM_MSG + hintDefault(' and copy to clipboard'));
+};
+
 const validators: Record<CmdKeyword, Validator> = {
 	[CmdKeywords.EXPORT]: () => {
 		return valid(
@@ -591,6 +615,8 @@ const validators: Record<CmdKeyword, Validator> = {
 	},
 
 	[CmdKeywords.CONFIG]: validateConfigCommand,
+
+	[CmdKeywords.YANK]: validateYankCommand,
 
 	[CmdKeywords.DELETE]: args => {
 		const editableNodeTypeValidation = guardBoardSwimlaneTicketNodes();

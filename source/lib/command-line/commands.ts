@@ -40,6 +40,7 @@ import {replayCommand} from './commands/replay.cmd.js';
 import {setAutoSyncDurationCommand} from './commands/set-auto-sync-duration.cmd.js';
 import {setAutoSyncCommand} from './commands/set-auto-sync.cmd.js';
 import {setLogLevelCommand} from './commands/set-log-level.cmd.js';
+import {yankCommand} from './commands/yank.cmd.js';
 import {syncCommand} from './commands/sync.cmd.js';
 import {AppEvent} from '../event/event.model.js';
 
@@ -351,7 +352,7 @@ export const commands: CommandLineActionEntry[] = [
 	},
 	{
 		intent: CmdIntent.Rename,
-		description: 'itle] Rename the currently selected node',
+		description: 'Rename the currently selected node',
 		mode: Mode.COMMAND_LINE,
 		action: async () => {
 			const userRes = resolveActorId();
@@ -727,6 +728,14 @@ export const commands: CommandLineActionEntry[] = [
 		onSuccess: () => patchState({mode: Mode.DEFAULT}),
 	},
 	{
+		intent: CmdIntent.Yank,
+		description:
+			'Yank (copy) ref, title, description, tags, or assignees to the clipboard',
+		mode: Mode.COMMAND_LINE,
+		action: async (_, cmdState) => yankCommand(cmdState),
+		onSuccess: () => patchState({mode: Mode.DEFAULT}),
+	},
+	{
 		intent: CmdIntent.Config,
 		description: 'Update editor, username, view, autosync, or sync debounce',
 		mode: Mode.COMMAND_LINE,
@@ -778,7 +787,11 @@ export const commands: CommandLineActionEntry[] = [
 						return failed('Invalid view mode');
 					}
 
+					const persistResult = setConfig({viewMode: value});
+					if (isFail(persistResult)) return persistResult;
+
 					patchSettingsState({viewMode: value});
+					patchState({mode: Mode.DEFAULT});
 
 					return succeeded(`View set to "${value}"`, null);
 				}

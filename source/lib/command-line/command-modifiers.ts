@@ -45,6 +45,16 @@ export const EditModifiers = {
 
 export type EditModifier = (typeof EditModifiers)[keyof typeof EditModifiers];
 
+export const YankModifiers = {
+	REF: 'ref',
+	TITLE: 'title',
+	DESCRIPTION: 'description',
+	TAGS: 'tags',
+	ASSIGNEES: 'assignees',
+} as const;
+
+export type YankModifier = (typeof YankModifiers)[keyof typeof YankModifiers];
+
 export const CONFIG_MODIFIERS = [
 	ConfigModifiers.EDITOR,
 	ConfigModifiers.VIEW,
@@ -96,6 +106,7 @@ const GLOBAL_COMMANDS = [
 	CmdKeywords.HELP,
 	CmdKeywords.EXPORT,
 	CmdKeywords.CONFIG,
+	CmdKeywords.YANK,
 ];
 
 const EDIT_COMMANDS = [
@@ -130,7 +141,7 @@ const COMMANDS_BY_CONTEXT: CommandMap = {
 	FIELD: [...GLOBAL_COMMANDS, ...TICKET_COMMANDS],
 	FIELD_LIST: [...GLOBAL_COMMANDS, ...TICKET_COMMANDS],
 	TEXT: [...GLOBAL_COMMANDS],
-	COMMENT: [CmdKeywords.EDIT, CmdKeywords.DELETE],
+	COMMENT: [CmdKeywords.EDIT, CmdKeywords.DELETE, CmdKeywords.YANK],
 };
 
 const getNewModifiers = (context: AnyContext): string[] => {
@@ -142,7 +153,7 @@ const getNewModifiers = (context: AnyContext): string[] => {
 // The "un"-commands and close/reopen only make sense against a concrete ticket,
 // so resolve the ticket currently in scope (selected, or anywhere up the
 // breadcrumb) the same way the tag/assign helpers do.
-const ticketInScope = ({
+export const ticketInScope = ({
 	breadCrumb,
 	selectedNode,
 }: Pick<AppState, 'breadCrumb' | 'selectedNode'>): Ticket | undefined =>
@@ -171,6 +182,28 @@ const getEditModifiersInScope = ({
 		: [...modifiers, EditModifiers.DESCRIPTION];
 };
 
+// `yank` copies from the ticket in scope when there is one; otherwise from the
+// selected node (a board or swimlane also has a ref and a title). Description,
+// tags, and assignees are only offered when the scoped ticket has them.
+const getYankModifiers = ({
+	selectedNode,
+	breadCrumb,
+}: Pick<AppState, 'selectedNode' | 'breadCrumb'>): YankModifier[] => {
+	const ticket = ticketInScope({breadCrumb, selectedNode});
+
+	if (!ticket) {
+		return selectedNode ? [YankModifiers.REF, YankModifiers.TITLE] : [];
+	}
+
+	return [
+		YankModifiers.REF,
+		YankModifiers.TITLE,
+		...(ticket.props?.description?.trim() ? [YankModifiers.DESCRIPTION] : []),
+		...(getTicketTags(ticket).length > 0 ? [YankModifiers.TAGS] : []),
+		...(getTicketAssignees(ticket).length > 0 ? [YankModifiers.ASSIGNEES] : []),
+	];
+};
+
 const getAvailableBaseCommands = ({
 	selectedNode,
 	readOnly,
@@ -195,6 +228,7 @@ const getAvailableBaseCommands = ({
 			CmdKeywords.REPLAY,
 			CmdKeywords.EXPORT,
 			CmdKeywords.CONFIG,
+			CmdKeywords.YANK,
 		];
 	}
 
@@ -215,6 +249,11 @@ const getAvailableBaseCommands = ({
 	return commandsInBreadcrumbContext.filter(command => {
 		if (command === CmdKeywords.MOVE) {
 			return false;
+		}
+
+		// Nothing to copy from without a scoped ticket or a selection.
+		if (command === CmdKeywords.YANK) {
+			return Boolean(ticket ?? selectedNode);
 		}
 
 		// `edit` can target the ticket in scope (e.g. `edit description`) even
@@ -282,6 +321,8 @@ export const getCmdModifiers = (
 		[CmdKeywords.REPLAY]: [...generatePeekOffsetHints()],
 
 		[CmdKeywords.EDIT]: getEditModifiersInScope({selectedNode, breadCrumb}),
+
+		[CmdKeywords.YANK]: getYankModifiers({selectedNode, breadCrumb}),
 
 		[CmdKeywords.COMMENT]: [],
 
