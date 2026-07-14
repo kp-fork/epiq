@@ -16,6 +16,8 @@ import {
 	updateIssueInGuiState,
 } from './lib/gui-state-helper';
 import {GuiState} from './lib/gui-state.model';
+import {blobToBase64, compressImage} from './lib/compress-image';
+import {AttachmentUploadStatus} from './components/IssueAttachments';
 import {SyncStatus} from './lib/gui-sync-statusmodel';
 import {GUI_THEME} from './lib/gui-theme';
 
@@ -74,6 +76,37 @@ export const App = () => {
 
 	const selectedIssue = state && issueId ? findIssue(state, issueId) : null;
 
+	// Paste-to-attach: the fastest screenshot flow. Text inputs keep their
+	// native paste behavior.
+	useEffect(() => {
+		const onPaste = (event: ClipboardEvent) => {
+			if (!selectedIssue || selectedIssue.readonly) return;
+
+			const target = event.target as HTMLElement | null;
+			if (
+				target &&
+				(target.tagName === 'INPUT' ||
+					target.tagName === 'TEXTAREA' ||
+					target.isContentEditable)
+			) {
+				return;
+			}
+
+			const files = Array.from(event.clipboardData?.items ?? [])
+				.filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+				.map(item => item.getAsFile())
+				.filter((file): file is File => Boolean(file));
+
+			if (files.length === 0) return;
+
+			event.preventDefault();
+			void uploadIssueAttachments(selectedIssue.id, files);
+		};
+
+		window.addEventListener('paste', onPaste);
+		return () => window.removeEventListener('paste', onPaste);
+	});
+
 	const closeIssueDetails = () => {
 		if (!boardSlug) return;
 
@@ -81,6 +114,9 @@ export const App = () => {
 	};
 
 	const commentsByIssueId = state?.commentsByIssueId ?? {};
+	const attachmentsByIssueId = state?.attachmentsByIssueId ?? {};
+	const [attachmentUploadStatus, setAttachmentUploadStatus] =
+		useState<AttachmentUploadStatus>({state: 'idle'});
 
 	const requestState = () => {
 		socketRef.current?.send(JSON.stringify({type: 'state:get'}));
@@ -383,6 +419,87 @@ export const App = () => {
 		send('issue:comment:add', {issueId, body});
 	};
 
+	const uploadIssueAttachments = async (issueId: string, files: File[]) => {
+		for (const file of files) {
+			setAttachmentUploadStatus({state: 'uploading', name: file.name});
+
+			const compressed = await compressImage(file, state?.attachmentMaxKb);
+
+			if ('error' in compressed) {
+				setAttachmentUploadStatus({state: 'error', message: compressed.error});
+				return;
+			}
+
+			try {
+				const dataBase64 = await blobToBase64(compressed.blob);
+
+				const response = await fetch('/api/attachments', {
+					method: 'POST',
+					headers: {'content-type': 'application/json'},
+					body: JSON.stringify({
+						issueId,
+						name: compressed.name,
+						dataBase64,
+					}),
+				});
+
+				const payload = await response.json();
+
+				if (!response.ok) {
+					setAttachmentUploadStatus({
+						state: 'error',
+						message: payload?.message ?? 'Upload failed',
+					});
+					return;
+				}
+
+				const nextState = getResultValue<GuiState>(payload);
+				if (nextState) setState(nextState);
+			} catch (error) {
+				setAttachmentUploadStatus({
+					state: 'error',
+					message: error instanceof Error ? error.message : 'Upload failed',
+				});
+				return;
+			}
+		}
+
+		setAttachmentUploadStatus({state: 'idle'});
+	};
+
+	const deleteIssueAttachment = async (
+		_issueId: string,
+		attachmentId: string,
+	) => {
+		try {
+			const response = await fetch(
+				`/api/attachments/${encodeURIComponent(attachmentId)}`,
+				{method: 'DELETE'},
+			);
+
+			const payload = await response.json();
+
+			if (!response.ok) {
+				setAttachmentUploadStatus({
+					state: 'error',
+					message: payload?.message ?? 'Unable to delete attachment',
+				});
+				return;
+			}
+
+			const nextState = getResultValue<GuiState>(payload);
+			if (nextState) setState(nextState);
+		} catch (error) {
+			setAttachmentUploadStatus({
+				state: 'error',
+				message:
+					error instanceof Error
+						? error.message
+						: 'Unable to delete attachment',
+			});
+		}
+	};
+
 	const deleteIssueComment = (_issueId: string, commentId: string) => {
 		setState(prev => {
 			if (!prev) return prev;
@@ -491,6 +608,10 @@ export const App = () => {
 						onRemoveAssignee={removeIssueAssignee}
 						onAddComment={addIssueComment}
 						onDeleteComment={deleteIssueComment}
+						attachments={attachmentsByIssueId[selectedIssue.id] ?? []}
+						attachmentUploadStatus={attachmentUploadStatus}
+						onUploadAttachments={uploadIssueAttachments}
+						onDeleteAttachment={deleteIssueAttachment}
 						onReopenIssue={reopenIssue}
 						onCloseIssue={closeIssue}
 						knownTags={state.tags ?? []}

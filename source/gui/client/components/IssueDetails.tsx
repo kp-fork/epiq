@@ -1,6 +1,12 @@
 import React, {useEffect, useState} from 'react';
 import {GUI_THEME} from '../lib/gui-theme';
-import {GuiUser, GuiIssue, GuiTag, GuiComment} from '../lib/gui-state.model';
+import {
+	GuiUser,
+	GuiIssue,
+	GuiTag,
+	GuiComment,
+	GuiAttachment,
+} from '../lib/gui-state.model';
 import {Aside} from './Aside';
 import {Button} from './Button';
 import {CopyRef} from './CopyRef';
@@ -13,6 +19,7 @@ import {
 	Input,
 	Textarea,
 } from './FormPrimitives';
+import {AttachmentUploadStatus, IssueAttachments} from './IssueAttachments';
 import {IssueComments} from './IssueComments';
 import {Section} from './Section';
 import {Tabs, TabItem} from './Tabs';
@@ -36,6 +43,10 @@ export const IssueDetails = ({
 	onReopenIssue,
 	onAddComment,
 	onDeleteComment,
+	attachments,
+	attachmentUploadStatus,
+	onUploadAttachments,
+	onDeleteAttachment,
 	knownTags: tags,
 	knownAssignees: assignees,
 }: {
@@ -55,6 +66,10 @@ export const IssueDetails = ({
 	onReopenIssue: (issueId: string) => void;
 	onAddComment?: (issueId: string, body: string) => void;
 	onDeleteComment?: (issueId: string, commentId: string) => void;
+	attachments: GuiAttachment[];
+	attachmentUploadStatus: AttachmentUploadStatus;
+	onUploadAttachments?: (issueId: string, files: File[]) => void;
+	onDeleteAttachment?: (issueId: string, attachmentId: string) => void;
 	knownTags: GuiTag[];
 	knownAssignees: GuiUser[];
 }) => {
@@ -425,6 +440,15 @@ export const IssueDetails = ({
 									</AddRow>
 								)}
 							</Section>
+
+							<IssueAttachments
+								issueId={issue.id}
+								readonly={Boolean(issue.readonly)}
+								attachments={attachments}
+								uploadStatus={attachmentUploadStatus}
+								onUploadFiles={onUploadAttachments}
+								onDeleteAttachment={onDeleteAttachment}
+							/>
 
 							<Section
 								title="Actions"
