@@ -183,6 +183,10 @@ claude mcp add epiq -- npx -y -p epiq epiq-mcp
 
 Use `--scope user` to make Epiq available in every directory; omit it to register Epiq only for the current project. Verify the connection with `claude mcp list` (it should report `epiq … ✔ Connected`). MCP servers are loaded at startup, so **restart Claude Code** after adding the server before its tools become available.
 
+### Skills
+
+Find skill at `.claude/skills/epiq/SKILL.md` that documents a recommended workflow for working the Epiq.
+
 ### Other MCP clients
 
 For clients that are configured by hand, add the following to the client's MCP config file — note this is **not** the same as Claude Code's `~/.claude.json`; Claude Desktop uses `claude_desktop_config.json`:
@@ -197,7 +201,6 @@ For clients that are configured by hand, add the following to the client's MCP c
 	}
 }
 ```
-
 
 Once registered, agents can interact with your local Epiq instance through the MCP.
 
@@ -249,6 +252,7 @@ Epiq follows a **local-first** model:
 > Frequent synchronization reduces divergence and keeps the system predictable
 
 ---
+
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-Epiq-pink?logo=github)](https://github.com/sponsors/ljtn)
 
 🫡 Never leave your editor!

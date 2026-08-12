@@ -55,6 +55,7 @@ type MoveIssueInput = ToolInput & {
 
 type ListIssuesInput = ToolInput & {
 	includeClosed?: boolean;
+	boardId?: string;
 };
 
 type ListSwimlanesInput = ToolInput & {
@@ -147,7 +148,10 @@ const resolveRepoRoot = (repoRoot?: string): Result<string> => {
 	return succeeded('Resolved Epiq repo root', result.value);
 };
 
-const boot = async (repoRoot?: string): Promise<Result<BootResult>> => {
+const boot = async (
+	repoRoot?: string,
+	options?: {pull?: boolean},
+): Promise<Result<BootResult>> => {
 	const repoRootResult = resolveRepoRoot(repoRoot);
 	if (isFail(repoRootResult)) return repoRootResult;
 
@@ -171,13 +175,18 @@ const boot = async (repoRoot?: string): Promise<Result<BootResult>> => {
 		return failed(ensureWorktreeResult.message);
 	}
 
-	const pullResult = await execGit({
-		cwd: stateBranchRootResult.value,
-		args: ['pull', '--ff-only'],
-	});
+	// MCP tools default to local-only. Fetching remote state
+	// is explicit via the `sync` tool; `getGuiState` opts back in for the
+	// GUI's own autosync loop.
+	if (options?.pull ?? false) {
+		const pullResult = await execGit({
+			cwd: stateBranchRootResult.value,
+			args: ['pull', '--ff-only'],
+		});
 
-	if (isFail(pullResult)) {
-		logger.info(3, pullResult.message);
+		if (isFail(pullResult)) {
+			logger.info(3, pullResult.message);
+		}
 	}
 
 	const eventsResult = loadMergedEvents(stateBranchRootResult.value);
@@ -238,7 +247,7 @@ const getIssueAssignees = (ticket: Ticket) =>
 		);
 
 export const listBoards = async (input: ToolInput = {}) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const stateResult = getStateResult();
@@ -258,7 +267,7 @@ export const listBoards = async (input: ToolInput = {}) => {
 };
 
 export const listSwimlanes = async (input: ListSwimlanesInput = {}) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const stateResult = getStateResult();
@@ -279,15 +288,22 @@ export const listSwimlanes = async (input: ListSwimlanesInput = {}) => {
 };
 
 export const listIssues = async (input: ListIssuesInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const stateResult = getStateResult();
 	if (isFail(stateResult)) return stateResult;
 
-	const issues: ApiIssue[] = Object.values(stateResult.value.nodes)
+	const nodes = stateResult.value.nodes;
+
+	const issues: ApiIssue[] = Object.values(nodes)
 		.filter(isTicketNode)
 		.filter(n => input.includeClosed || n.parentNodeId !== CLOSED_SWIMLANE_ID)
+		.filter(n => {
+			if (!input.boardId) return true;
+			const swimlane = n.parentNodeId ? nodes[n.parentNodeId] : undefined;
+			return swimlane?.parentNodeId === input.boardId;
+		})
 		.map(
 			n =>
 				({
@@ -307,7 +323,7 @@ export const listIssues = async (input: ListIssuesInput) => {
 };
 
 export const createIssue = async (input: CreateIssueInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -346,7 +362,7 @@ export const createIssue = async (input: CreateIssueInput) => {
 };
 
 export const closeIssue = async (input: CloseIssueInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -382,7 +398,7 @@ export const closeIssue = async (input: CloseIssueInput) => {
 };
 
 export const reopenIssue = async (input: CloseIssueInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -527,7 +543,7 @@ export const sync = async (input: SyncInput = {}) => {
 };
 
 export const getEpiqState = async (input: ToolInput = {}) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const stateResult = getStateResult();
@@ -547,7 +563,10 @@ export const getEpiqState = async (input: ToolInput = {}) => {
 export const getGuiState = async (
 	input: ToolInput = {},
 ): Promise<Result<ApiState>> => {
-	const bootResult = await boot(input.repoRoot);
+	// Unlike the other MCP tools above, the GUI's autosync loop relies on
+	// this pull to keep multi-user state fresh in near-real-time — do not
+	// disable it here (see api-autosync.ts).
+	const bootResult = await boot(input.repoRoot, {pull: true});
 	if (isFail(bootResult)) return bootResult;
 
 	const stateResult = getStateResult();
@@ -682,7 +701,7 @@ export const getGuiState = async (
 export const editIssueDescription = async (
 	input: EditIssueDescriptionInput,
 ) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -730,7 +749,7 @@ export const editIssueDescription = async (
 };
 
 export const editIssueTitle = async (input: EditIssueTitleInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -782,7 +801,7 @@ export const editIssueTitle = async (input: EditIssueTitleInput) => {
 };
 
 export const addIssueTag = async (input: AddIssueTagInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -845,7 +864,7 @@ export const addIssueTag = async (input: AddIssueTagInput) => {
 };
 
 export const removeIssueTag = async (input: RemoveIssueTagInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -888,7 +907,7 @@ export const removeIssueTag = async (input: RemoveIssueTagInput) => {
 };
 
 export const addIssueAssignee = async (input: AddIssueAssigneeInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -951,7 +970,7 @@ export const addIssueAssignee = async (input: AddIssueAssigneeInput) => {
 };
 
 export const removeIssueAssignee = async (input: RemoveIssueAssigneeInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -994,7 +1013,7 @@ export const removeIssueAssignee = async (input: RemoveIssueAssigneeInput) => {
 };
 
 export const addIssueComment = async (input: AddIssueCommentInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -1044,7 +1063,7 @@ export const addIssueComment = async (input: AddIssueCommentInput) => {
 };
 
 export const deleteIssueComment = async (input: DeleteIssueCommentInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -1110,7 +1129,7 @@ export const deleteIssueComment = async (input: DeleteIssueCommentInput) => {
 };
 
 export const addIssueAttachment = async (input: AddIssueAttachmentInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -1170,7 +1189,7 @@ export const addIssueAttachment = async (input: AddIssueAttachmentInput) => {
 export const deleteIssueAttachment = async (
 	input: DeleteIssueAttachmentInput,
 ) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	const actorResult = getActor();
@@ -1243,7 +1262,7 @@ export const deleteIssueAttachment = async (
  * blobs are untrusted input.
  */
 export const getAttachmentBlob = async (input: GetAttachmentBlobInput) => {
-	const bootResult = await boot(input.repoRoot);
+	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
 
 	return resolveAttachmentBlob(

@@ -174,6 +174,34 @@ const nodes: Record<string, Partial<NavNode<AnyContext>>> = {
 		rank: 'z0',
 		props: {description: '', tags: [], assignees: []},
 	},
+	'board-2': {
+		id: 'board-2',
+		title: 'Other board',
+		context: 'BOARD',
+		parentNodeId: 'workspace-1',
+		readonly: false,
+		isDeleted: false,
+		rank: 'b0',
+	},
+	'swimlane-3': {
+		id: 'swimlane-3',
+		title: 'Todo',
+		context: 'SWIMLANE',
+		parentNodeId: 'board-2',
+		readonly: false,
+		isDeleted: false,
+		rank: 'a0',
+	},
+	'issue-2': {
+		id: 'issue-2',
+		title: 'Other board issue',
+		context: 'TICKET',
+		parentNodeId: 'swimlane-3',
+		readonly: false,
+		isDeleted: false,
+		rank: 'a0',
+		props: {description: '', tags: [], assignees: []},
+	},
 };
 
 vi.mock('../../lib/state/state.js', async importOriginal => {
@@ -254,12 +282,14 @@ vi.mock('../../lib/event/common-events.js', () => ({
 
 let tools: typeof import('../epiq-api.js');
 let persistModule: typeof import('../../lib/event/event-materialize-and-persist.js');
+let gitUtilsModule: typeof import('../../git/git-utils.js');
 
 beforeAll(async () => {
 	tools = await import('../epiq-api.js');
 	persistModule = await import(
 		'../../lib/event/event-materialize-and-persist.js'
 	);
+	gitUtilsModule = await import('../../git/git-utils.js');
 });
 
 describe('mcp tools', () => {
@@ -280,8 +310,47 @@ describe('mcp tools', () => {
 					parentId: 'workspace-1',
 					readonly: false,
 				},
+				{
+					id: 'board-2',
+					ref: 'BOARD-2',
+					title: 'Other board',
+					parentId: 'workspace-1',
+					readonly: false,
+				},
 			]);
 		}
+	});
+
+	it('does not pull from remote when listing boards, swimlanes, issues, or state (#80)', async () => {
+		await tools.listBoards({repoRoot: '/repo'});
+		await tools.listSwimlanes({repoRoot: '/repo'});
+		await tools.listIssues({repoRoot: '/repo', includeClosed: false});
+		await tools.getEpiqState({repoRoot: '/repo'});
+
+		const pullCalls = vi
+			.mocked(gitUtilsModule.execGit)
+			.mock.calls.filter(([call]) => call.args.includes('pull'));
+
+		expect(pullCalls).toEqual([]);
+	});
+
+	it('does not pull from remote when writing either, e.g. creating or tagging an issue (#80)', async () => {
+		await tools.createIssue({
+			repoRoot: '/repo',
+			title: 'New issue',
+			parentId: 'swimlane-1',
+		});
+		await tools.addIssueTag({
+			repoRoot: '/repo',
+			issueId: 'issue-1',
+			tagName: 'urgent',
+		});
+
+		const pullCalls = vi
+			.mocked(gitUtilsModule.execGit)
+			.mock.calls.filter(([call]) => call.args.includes('pull'));
+
+		expect(pullCalls).toEqual([]);
 	});
 
 	it('lists swimlanes', async () => {
@@ -308,16 +377,42 @@ describe('mcp tools', () => {
 
 		expect(isFail(result)).toBe(false);
 		if (!isFail(result)) {
-			expect(result.value).toEqual([
-				expect.objectContaining({
-					id: 'issue-1',
-					title: 'Fix bug',
-					description: 'A bug description',
-					parentNodeId: 'swimlane-1',
-					isClosed: false,
-					readonly: false,
-				}),
+			expect(result.value.map(issue => issue.id).sort()).toEqual([
+				'issue-1',
+				'issue-2',
 			]);
+			expect(result.value).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						id: 'issue-1',
+						title: 'Fix bug',
+						description: 'A bug description',
+						parentNodeId: 'swimlane-1',
+						isClosed: false,
+						readonly: false,
+					}),
+				]),
+			);
+		}
+	});
+
+	it('scopes issues to a single board via boardId', async () => {
+		const boardOne = await tools.listIssues({
+			repoRoot: '/repo',
+			includeClosed: false,
+			boardId: 'board-1',
+		});
+		const boardTwo = await tools.listIssues({
+			repoRoot: '/repo',
+			includeClosed: false,
+			boardId: 'board-2',
+		});
+
+		expect(isFail(boardOne)).toBe(false);
+		expect(isFail(boardTwo)).toBe(false);
+		if (!isFail(boardOne) && !isFail(boardTwo)) {
+			expect(boardOne.value.map(issue => issue.id)).toEqual(['issue-1']);
+			expect(boardTwo.value.map(issue => issue.id)).toEqual(['issue-2']);
 		}
 	});
 

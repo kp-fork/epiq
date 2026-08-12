@@ -53,10 +53,12 @@ export const createMcpServer = () => {
 	server.registerTool(
 		'epiq_issue_list',
 		{
-			description: 'List Epiq issues',
+			description:
+				'List Epiq issues. Pass boardId to scope results to a single board and reduce response size.',
 			inputSchema: z.object({
 				repoRoot: z.string().optional(),
 				includeClosed: z.boolean().optional(),
+				boardId: z.string().optional(),
 			}),
 		},
 		async input => resultJson(await listIssues(input)),
@@ -258,7 +260,8 @@ export const createMcpServer = () => {
 	server.registerTool(
 		'epiq_sync',
 		{
-			description: 'Sync Epiq state with the configured Git remote',
+			description:
+				'Sync Epiq state with the configured Git remote (pull remote changes and push local ones). Other Epiq MCP tools only read and write local state and never sync automatically — call this on demand when you need to see or publish the latest remote changes.',
 			inputSchema: z.object({
 				repoRoot: z.string().optional(),
 			}),
