@@ -3,10 +3,14 @@ import path from 'node:path';
 import {failed, isFail, Result, succeeded} from '../model/result-types.js';
 import {getRepoRootDir, getStateBranchRoot} from '../../git/git-storage.js';
 
+export {
+	GLOBAL_CONFIG_DIR_NAME,
+	getGlobalConfigDir,
+} from './global-config-dir.js';
+
 export const isLocal = process.env['IS_LOCAL'] === 'true';
 
 export const EPIQ_DIR_NAME = '.epiq';
-export const GLOBAL_CONFIG_DIR_NAME = '.epiq-global';
 export const EVENTS_DIR_NAME = 'events';
 export const MEDIA_DIR_NAME = 'media';
 export const PROJECT_FILE_NAME = 'project.json';
