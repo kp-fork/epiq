@@ -1,5 +1,5 @@
-import React, {useEffect, useState} from 'react';
-import {GUI_THEME} from '../lib/gui-theme';
+import React, {useEffect, useRef, useState} from 'react';
+import {CONTENT_FONT, GUI_THEME} from '../lib/gui-theme';
 import {
 	GuiUser,
 	GuiIssue,
@@ -21,6 +21,7 @@ import {
 } from './FormPrimitives';
 import {AttachmentUploadStatus, IssueAttachments} from './IssueAttachments';
 import {IssueComments} from './IssueComments';
+import {MarkdownContent} from './MarkdownContent';
 import {Section} from './Section';
 import {Tabs, TabItem} from './Tabs';
 
@@ -81,6 +82,35 @@ export const IssueDetails = ({
 	const [editingDescription, setEditingDescription] = useState(false);
 	const [addingTag, setAddingTag] = useState(false);
 	const [addingAssignee, setAddingAssignee] = useState(false);
+	const panelRef = useRef<HTMLElement | null>(null);
+	const titleTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+	const resizeTitleTextarea = () => {
+		const el = titleTextareaRef.current;
+		if (!el) return;
+		el.style.height = 'auto';
+		el.style.height = `${el.scrollHeight}px`;
+	};
+
+	useEffect(() => {
+		if (editingTitle) resizeTitleTextarea();
+	}, [editingTitle]);
+
+	useEffect(() => {
+		if (!issue) return;
+
+		const handleClickOutside = (event: MouseEvent) => {
+			if (
+				panelRef.current &&
+				!panelRef.current.contains(event.target as Node)
+			) {
+				onClose();
+			}
+		};
+
+		document.addEventListener('mousedown', handleClickOutside);
+		return () => document.removeEventListener('mousedown', handleClickOutside);
+	}, [issue, onClose]);
 
 	useEffect(() => {
 		setTitle(issue?.title ?? '');
@@ -96,8 +126,8 @@ export const IssueDetails = ({
 	const disabled = !issue || issue.readonly;
 
 	const tabs: TabItem<IssueDetailsTab>[] = [
-		{id: 'overview', label: 'overview'},
-		{id: 'comments', label: 'comments', count: comments.length},
+		{id: 'overview', label: 'Overview'},
+		{id: 'comments', label: 'Comments', count: comments.length},
 	];
 
 	const saveTitle = () => {
@@ -163,7 +193,7 @@ export const IssueDetails = ({
 	);
 
 	return (
-		<Aside>
+		<Aside ref={panelRef}>
 			{issue ? (
 				<>
 					<FormHeader>
@@ -183,60 +213,66 @@ export const IssueDetails = ({
 						</Button>
 					</FormHeader>
 
+					{editingTitle ? (
+						<textarea
+							ref={titleTextareaRef}
+							value={title}
+							autoFocus
+							rows={1}
+							onChange={event => {
+								setTitle(event.target.value);
+								resizeTitleTextarea();
+							}}
+							onKeyDown={event => {
+								if (event.key === 'Enter') {
+									event.preventDefault();
+									event.currentTarget.blur();
+								}
+								if (event.key === 'Escape') cancelTitle();
+							}}
+							onBlur={saveTitle}
+							style={{
+								display: 'block',
+								width: '100%',
+								boxSizing: 'border-box',
+								resize: 'none',
+								overflow: 'hidden',
+								background: GUI_THEME.bg,
+								color: GUI_THEME.primary,
+								border: `1px solid ${GUI_THEME.line}`,
+								borderRadius: 8,
+								padding: '6px 10px',
+								outline: 'none',
+								font: 'inherit',
+								fontSize: 18,
+								fontWeight: 600,
+								lineHeight: 1.35,
+								marginBottom: 20,
+							}}
+						/>
+					) : (
+						<div
+							onClick={() => !issue.readonly && setEditingTitle(true)}
+							style={{
+								marginBottom: 18,
+								color: GUI_THEME.primary,
+								fontSize: 18,
+								fontWeight: 600,
+								lineHeight: 1.35,
+								wordBreak: 'break-word',
+								cursor: issue.readonly ? 'default' : 'text',
+							}}
+						>
+							{issue.title}
+						</div>
+					)}
+
 					<Tabs tabs={tabs} activeTab={activeTab} onChange={onChangeTab} />
 
 					{activeTab === 'overview' && (
 						<>
 							<Section
 								first={true}
-								title="Title"
-								action={
-									!issue.readonly &&
-									!editingTitle && (
-										<Button
-											variant="ghost"
-											onClick={() => setEditingTitle(true)}
-										>
-											edit
-										</Button>
-									)
-								}
-							>
-								{editingTitle ? (
-									<>
-										<Input
-											value={title}
-											autoFocus
-											onChange={event => setTitle(event.target.value)}
-											onKeyDown={event => {
-												if (event.key === 'Enter') saveTitle();
-												if (event.key === 'Escape') cancelTitle();
-											}}
-										/>
-
-										<ActionRow>
-											<Button onClick={saveTitle}>save</Button>
-											<Button variant="ghost" onClick={cancelTitle}>
-												cancel
-											</Button>
-										</ActionRow>
-									</>
-								) : (
-									<div
-										style={{
-											marginTop: 8,
-											color: GUI_THEME.primary,
-											fontSize: 12,
-											lineHeight: 1.45,
-											wordBreak: 'break-word',
-										}}
-									>
-										{issue.title}
-									</div>
-								)}
-							</Section>
-
-							<Section
 								title="Description"
 								action={
 									!issue.readonly &&
@@ -266,6 +302,13 @@ export const IssueDetails = ({
 													saveDescription();
 												}
 											}}
+											style={{
+												font: 'inherit',
+												fontFamily: CONTENT_FONT,
+												fontSize: 13,
+												maxHeight: 320,
+												overflowY: 'auto',
+											}}
 										/>
 
 										<ActionRow>
@@ -276,19 +319,18 @@ export const IssueDetails = ({
 										</ActionRow>
 									</>
 								) : issue.description ? (
-									<p
+									<div
 										style={{
-											lineHeight: 1.55,
-											whiteSpace: 'pre-wrap',
-											margin: '8px 0 0',
+											marginTop: 8,
 											padding: '12px 16px',
-											background: 'rgba(0, 0, 0, 0.22)',
+											maxHeight: 320,
+											overflowY: 'auto',
+											background: GUI_THEME.tertiary,
 											borderRadius: 8,
-											color: GUI_THEME.primary,
 										}}
 									>
-										{issue.description}
-									</p>
+										<MarkdownContent content={issue.description} />
+									</div>
 								) : (
 									<Empty>No description</Empty>
 								)}
