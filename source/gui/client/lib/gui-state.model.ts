@@ -1,6 +1,15 @@
 export type GuiTag = {id: string; name: string; color: string};
 export type GuiUser = {id: string; name: string; color: string};
 
+// Who can be assigned, as opposed to GuiState.contributors, which is only the
+// registry.
+export type GuiContributor = GuiUser & {
+	isSelf: boolean;
+	isRemoved: boolean;
+	// Workspace-wide: their name is somewhere in the event log, making name un-clearable.
+	hasAuthoredAnywhere: boolean;
+};
+
 export type GuiComment = {
 	id: string;
 	issueId: string;
@@ -46,6 +55,11 @@ type GuiBoard = {
 	swimlanes: GuiSwimlane[];
 };
 
+export type GuiTimeTravelStatus = {
+	mode: 'live' | 'scrub';
+	asOfTime: number | null;
+};
+
 export type GuiState = {
 	boards: GuiBoard[];
 	tags: GuiTag[];
@@ -54,4 +68,22 @@ export type GuiState = {
 	commentsByIssueId: Record<string, GuiComment[]>;
 	attachmentsByIssueId: Record<string, GuiAttachment[]>;
 	attachmentMaxKb?: number;
+	timeTravel: GuiTimeTravelStatus;
+};
+
+export type GuiEventTimelineBucket = {t: number; count: number};
+
+export type GuiEventTimeline = {
+	bucketMs: number;
+	buckets: GuiEventTimelineBucket[];
+	earliest: number;
+	latest: number;
+};
+
+export type GuiCommitEntry = {
+	sha: string;
+	time: number;
+	author: string;
+	subject: string;
+	linesChanged: number;
 };

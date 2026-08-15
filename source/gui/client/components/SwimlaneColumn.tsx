@@ -2,9 +2,19 @@ import React from 'react';
 import {DropIndicator} from '../App';
 import {GuiComment, GuiSwimlane} from '../lib/gui-state.model';
 import {GUI_THEME} from '../lib/gui-theme';
+import {IconLock} from './IconLock';
 import {Panel} from './Panel';
 import {TicketCard} from './TicketCard';
 import {Button} from './Button';
+
+// Not GUI_THEME.accent: at that hue a large soft wash reads cyan-green rather
+// than blue, so this is desaturated toward the panel chrome's blue-grey.
+const COLUMN_GLOW_COLOR = 'rgb(140, 176, 232)';
+
+const COLUMN_PADDING = 14;
+// Half the padding, so the scrollbar sits centred in the gutter. The two have
+// to move together.
+const SCROLLBAR_GUTTER_INSET = COLUMN_PADDING / 2;
 
 export const SwimlaneColumn = ({
 	swimlane,
@@ -44,14 +54,24 @@ export const SwimlaneColumn = ({
 			as="section"
 			active={dragOver}
 			borderColor={selected || dragOver ? GUI_THEME.accent : GUI_THEME.line}
-			glowOpacity={0.15}
+			// Tuned by eye: 0.15 was imperceptible, 0.6 distracting. The wide radius
+			// keeps it a soft wash rather than a hotspot tracking the cursor, and the
+			// reach lights a column up as a dragged ticket approaches from outside.
+			glowColor={COLUMN_GLOW_COLOR}
+			glowOpacity={0.41}
+			glowRadius={370}
+			proximityReach={200}
 			style={{
 				zIndex: 0,
 				width: 360,
 				minWidth: 360,
-				height: 'calc(100vh - 160px)',
+				// Fills the board row rather than guessing at the chrome above with a
+				// viewport calc; the scrubber's height changes as it is used.
+				height: '100%',
+				// Panel's 1px border would otherwise add to the 100% and overflow the row.
+				boxSizing: 'border-box',
 				background: dragOver ? '#14202a' : GUI_THEME.bg,
-				padding: '0 14px',
+				padding: `0 ${COLUMN_PADDING}px`,
 				display: 'flex',
 				flexDirection: 'column',
 			}}
@@ -114,7 +134,14 @@ export const SwimlaneColumn = ({
 
 					<span style={{color: GUI_THEME.dim}}>({swimlane.issues.length})</span>
 
-					{swimlane.readonly && <span>🔒</span>}
+					{swimlane.readonly && (
+						<span
+							title="Read-only"
+							style={{display: 'flex', color: GUI_THEME.dim}}
+						>
+							<IconLock />
+						</span>
+					)}
 				</div>
 				<div>
 					<Button
@@ -128,7 +155,19 @@ export const SwimlaneColumn = ({
 				</div>
 			</header>
 
-			<div style={{overflow: 'auto', paddingTop: 4, flex: 1, minHeight: 0}}>
+			{/* Pulling out by half the panel padding and giving the same back centres
+			    the scrollbar in the gutter instead of leaving it flush against the
+			    cards. */}
+			<div
+				style={{
+					overflow: 'auto',
+					paddingTop: 4,
+					marginRight: -SCROLLBAR_GUTTER_INSET,
+					paddingRight: SCROLLBAR_GUTTER_INSET,
+					flex: 1,
+					minHeight: 0,
+				}}
+			>
 				{swimlane.issues.length === 0 ? (
 					<>
 						{dropIndex === 0 && <DropIndicator />}
@@ -157,7 +196,7 @@ export const SwimlaneColumn = ({
 									onSelect={() => onSelectIssue(ticket.id)}
 									onDragStart={issueId => onSelectIssue(issueId)}
 									onOpenComments={onSelectIssueComments}
-									commentCount={commentsByIssueId[ticket.id].length ?? 0}
+									commentCount={commentsByIssueId[ticket.id]?.length ?? 0}
 									onDragOverIssue={targetIndex =>
 										onDragOverIssue(swimlane.id, targetIndex)
 									}

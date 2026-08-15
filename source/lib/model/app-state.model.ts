@@ -25,7 +25,18 @@ export type BreadCrumb =
 export type ViewMode = 'wide' | 'dense';
 
 export type Tag = {id: string; name: string};
-export type Contributor = {id: string; name: string; userId?: string};
+// A placeholder, not an empty name, so a tombstoned assignee still reads as one.
+export const REMOVED_CONTRIBUTOR_NAME = 'removed';
+
+// `tombstoned` is a flag rather than a comparison against the placeholder name,
+// so that read paths can let removal beat the event-log name override without
+// catching anyone genuinely called "removed".
+export type Contributor = {
+	id: string;
+	name: string;
+	userId?: string;
+	tombstoned?: boolean;
+};
 
 export type Filter = {
 	target: 'tag' | 'assignee' | 'description' | 'title' | 'ref';

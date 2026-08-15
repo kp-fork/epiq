@@ -367,6 +367,40 @@ const materializeHandlers: MaterializeHandlers = {
 		});
 	},
 
+	'tombstone.contributor': event => {
+		const {id} = event.payload;
+		const result = nodeRepo.tombstoneContributor(id);
+
+		if (isFail(result)) {
+			return materializeFail(
+				result.message ?? 'Unable to remove contributor',
+				event,
+			);
+		}
+
+		return succeeded('Contributor tombstoned', {
+			action: event.action,
+			result: result.value,
+		});
+	},
+
+	'restore.contributor': event => {
+		const {id, name} = event.payload;
+		const result = nodeRepo.restoreContributor(id, name);
+
+		if (isFail(result)) {
+			return materializeFail(
+				result.message ?? 'Unable to restore contributor',
+				event,
+			);
+		}
+
+		return succeeded('Contributor restored', {
+			action: event.action,
+			result: result.value,
+		});
+	},
+
 	'add.issue.tag': event => {
 		const {id, tag} = event.payload;
 		const result = nodeRepo.tag(id, tag);

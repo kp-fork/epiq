@@ -2,11 +2,14 @@ import http from 'node:http';
 import {WebSocket, WebSocketServer} from 'ws';
 import {
 	addIssueAssignee,
+	getBoardContributors,
+	tombstoneContributor,
 	addIssueComment,
 	addIssueTag,
 	closeIssue,
 	createIssue,
 	deleteIssueComment,
+	deriveGuiState,
 	editIssueDescription,
 	editIssueTitle,
 	getGuiState,
@@ -17,12 +20,48 @@ import {
 	reopenIssue,
 	sync,
 } from '../../../mcp/epiq-api.js';
+import {
+	checkoutStateAt,
+	getCommitTimeline,
+	getEventTimeline,
+	getTimeTravelStatus,
+	openCommitDiffInEditor,
+	returnToLive,
+	runExclusive,
+} from '../../../mcp/epiq-time-travel.js';
 import {isFail, Result} from '../../../lib/model/result-types.js';
 import {
 	broadcastGuiMessage,
 	registerGuiSocket,
 } from '../../client/lib/gui-broadcast.js';
 import {GuiMessage} from './websocket.model.js';
+
+const MUTATING_MESSAGE_TYPES = new Set<GuiMessage['type']>([
+	'sync',
+	'issues:create',
+	'issues:move',
+	'issue:close',
+	'issue:reopen',
+	'issue:edit:title',
+	'issue:edit:description',
+	'issue:tag:add',
+	'issue:tag:remove',
+	'contributor:remove',
+	'issue:assignee:add',
+	'issue:assignee:remove',
+	'issue:comment:add',
+	'issue:comment:delete',
+]);
+
+// Derives rather than boots, so a live re-materialize can't stomp a checkout.
+const broadcastDerivedState = () => {
+	const result = deriveGuiState();
+
+	broadcastGuiMessage({
+		type: 'state',
+		payload: result,
+	});
+};
 
 const sendSocket = (socket: WebSocket, body: unknown) => {
 	socket.send(JSON.stringify(body));
@@ -33,6 +72,27 @@ const sendGuiState = async (socket: WebSocket, repoRoot: string) =>
 		type: 'state',
 		payload: await getGuiState({repoRoot}),
 	});
+
+const sendStateAfterMutation = async (socket: WebSocket, repoRoot: string) => {
+	const sendDerivedState = () =>
+		sendSocket(socket, {
+			type: 'state',
+			payload: deriveGuiState(),
+		});
+
+	if (getTimeTravelStatus().mode !== 'live') return sendDerivedState();
+
+	const payload = await getGuiState({repoRoot});
+
+	// This runs outside the time-travel lock, so a scrub can land during the boot
+	// above. Re-check before publishing.
+	if (getTimeTravelStatus().mode !== 'live') return sendDerivedState();
+
+	return sendSocket(socket, {
+		type: 'state',
+		payload,
+	});
+};
 
 const sendMutationResult = async (
 	socket: WebSocket,
@@ -55,8 +115,7 @@ const sendMutationResult = async (
 
 	onStateChanged();
 
-	// Broadcast refresh to everyone, but do not block the requester UX.
-	void sendGuiState(socket, repoRoot);
+	void sendStateAfterMutation(socket, repoRoot);
 
 	return;
 };
@@ -75,9 +134,67 @@ export const setupWebsocket = (
 		registerGuiSocket(socket);
 
 		socket.on('message', async raw => {
-			try {
-				const message = JSON.parse(raw.toString()) as GuiMessage;
+			const dispatchMessage = async (message: GuiMessage) => {
 				const {type} = message;
+
+				// Echoed back rather than forwarded into the API: the client pairs
+				// the timeline and commit replies by it.
+				if (type === 'timeline:get') {
+					const {requestId, ...query} = message.payload ?? {};
+					return sendSocket(socket, {
+						type: 'timeline',
+						requestId,
+						payload: await getEventTimeline({repoRoot, ...query}),
+					});
+				}
+
+				if (type === 'commits:get') {
+					const {requestId, ...query} = message.payload ?? {};
+					return sendSocket(socket, {
+						type: 'commits',
+						requestId,
+						payload: await getCommitTimeline({repoRoot, ...query}),
+					});
+				}
+
+				if (type === 'commit:inspect') {
+					return sendSocket(socket, {
+						type: 'commit:inspect:result',
+						payload: await openCommitDiffInEditor({
+							repoRoot,
+							sha: message.payload.sha,
+						}),
+					});
+				}
+
+				if (type === 'time-travel:scrub') {
+					const result = await checkoutStateAt({
+						repoRoot,
+						targetTime: message.payload.targetTime,
+					});
+
+					sendSocket(socket, {
+						type: 'time-travel:result',
+						payload: result,
+					});
+
+					if (isFail(result)) return;
+
+					return broadcastDerivedState();
+				}
+
+				if (type === 'time-travel:live') {
+					const result = await returnToLive({repoRoot});
+
+					sendSocket(socket, {
+						type: 'time-travel:result',
+						payload: result,
+					});
+
+					if (isFail(result)) return;
+
+					return broadcastDerivedState();
+				}
 
 				if (type === 'state:get') {
 					return sendGuiState(socket, repoRoot);
@@ -190,6 +307,31 @@ export const setupWebsocket = (
 						'issue:tag:remove:result',
 						result,
 					);
+				}
+
+				if (type === 'contributor:remove') {
+					const result = await tombstoneContributor({
+						repoRoot,
+						...message.payload,
+					});
+
+					return sendMutationResult(
+						socket,
+						repoRoot,
+						onStateChanged,
+						'contributor:remove:result',
+						result,
+					);
+				}
+
+				if (type === 'contributors:get') {
+					return sendSocket(socket, {
+						type: 'contributors',
+						payload: await getBoardContributors({
+							repoRoot,
+							...message.payload,
+						}),
+					});
 				}
 
 				if (type === 'issue:assignee:add') {
@@ -325,6 +467,28 @@ export const setupWebsocket = (
 				return sendSocket(socket, {
 					type: 'error',
 					message: 'Unknown message type',
+				});
+			};
+
+			try {
+				const message = JSON.parse(raw.toString()) as GuiMessage;
+
+				if (!MUTATING_MESSAGE_TYPES.has(message.type)) {
+					return await dispatchMessage(message);
+				}
+
+				// The live check must stay *inside* the lock; checking then awaiting is
+				// check-then-act. `runExclusive` is not re-entrant, so nothing reached
+				// from here may take it again.
+				return await runExclusive(async () => {
+					if (getTimeTravelStatus().mode !== 'live') {
+						return sendSocket(socket, {
+							type: 'failed',
+							payload: 'Read-only while viewing history',
+						});
+					}
+
+					return dispatchMessage(message);
 				});
 			} catch (error) {
 				return sendSocket(socket, {

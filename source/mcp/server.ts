@@ -4,6 +4,9 @@ import {z} from 'zod';
 import {isFail, Result} from '../lib/model/result-types.js';
 import {
 	addIssueAssignee,
+	getBoardContributors,
+	tombstoneContributor,
+	restoreContributor,
 	addIssueComment,
 	addIssueTag,
 	closeIssue,
@@ -228,13 +231,55 @@ export const createMcpServer = () => {
 	);
 
 	server.registerTool(
+		'epiq_contributor_list',
+		{
+			description:
+				'List people who can be assigned: everyone who has authored an event (optionally scoped to one board) unioned with the contributor registry. Use these ids with epiq_issue_assignee_add rather than assigning by name.',
+			inputSchema: z.object({
+				boardId: z.string().min(1).optional(),
+				repoRoot: z.string().optional(),
+			}),
+		},
+		async input => resultJson(await getBoardContributors(input)),
+	);
+
+	server.registerTool(
+		'epiq_contributor_remove',
+		{
+			description:
+				'Remove an external contributor from the assignee suggestion lists. Their id and every reference to it survive, so existing assignments stay intact and the event log is untouched. Refused for anyone who has authored events, since their name is in the log regardless.',
+			inputSchema: z.object({
+				contributorId: z.string().min(1),
+				repoRoot: z.string().optional(),
+			}),
+		},
+		async input => resultJson(await tombstoneContributor(input)),
+	);
+
+	server.registerTool(
+		'epiq_contributor_restore',
+		{
+			description:
+				'Put a contributor removed with epiq_contributor_remove back into the suggestion lists, under the name they were created with.',
+			inputSchema: z.object({
+				contributorId: z.string().min(1),
+				repoRoot: z.string().optional(),
+			}),
+		},
+		async input => resultJson(await restoreContributor(input)),
+	);
+
+	server.registerTool(
 		'epiq_issue_assignee_add',
 		{
 			description:
-				'Assign a contributor to an Epiq issue, creating the contributor if they do not exist',
+				'Assign a contributor to an Epiq issue. Pass self:true to assign yourself. Prefer assigneeId otherwise, which assigns a known contributor (from the registry or the event log) and fails if the id is unknown. assigneeName matches an existing contributor by name; to create somebody new from a name you must also pass createUnlinked, which adds them as an external (non-contributor) assignee.',
 			inputSchema: z.object({
 				issueId: z.string().min(1),
-				assigneeName: z.string().min(1),
+				assigneeId: z.string().min(1).optional(),
+				self: z.boolean().optional(),
+				assigneeName: z.string().min(1).optional(),
+				createUnlinked: z.boolean().optional(),
 				repoRoot: z.string().optional(),
 			}),
 		},

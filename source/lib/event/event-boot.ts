@@ -203,7 +203,26 @@ export function createDefaultEvents({
 	] as const satisfies readonly AppEvent[]);
 }
 
+// Booting resets `timeMode` to 'live' and `readOnly` to false, so re-booting
+// while checked out in the past would silently discard the checkout and reopen
+// the mutation guards. Only an explicit non-live mode skips, so an
+// uninitialized state still boots normally.
+const isCheckedOutInThePast = (): boolean => {
+	const stateResult = getSafeState();
+	if (isFail(stateResult)) return false;
+
+	const {timeMode} = stateResult.value;
+	return timeMode === 'peek' || timeMode === 'replay';
+};
+
 export function bootStateFromEventLog(eventLog: AppEvent[]): Result {
+	if (isCheckedOutInThePast()) {
+		return succeeded(
+			'Skipped boot while checked out at a historical point',
+			null,
+		);
+	}
+
 	if (!eventLog.length) {
 		const workspace = nodes.workspace(
 			'temporary-uninitialized-workspace',

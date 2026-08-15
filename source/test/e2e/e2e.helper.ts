@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// These files run one at a time (`--no-file-parallelism`). Each drives a real
+// TUI through a pty and shells out to git, so parallelism only adds contention.
 const width = 120;
 const height = 20;
 
@@ -42,22 +44,13 @@ type TuiSession = {
 	destroy: () => void;
 };
 
-// Isolated per test file (vitest forks/isolates each file into its own
-// process), so all `setupTui()` calls in one file share this global dir, but
-// concurrently-running files never touch each other's real or simulated
-// `~/.epiq-global`. Without this, every e2e process shared the developer's
-// or CI runner's actual `~/.epiq-global`, so parallel files raced on the same
-// global config/worktrees — the likely cause of the flaky ":init" timing and
-// stray "not an epiq project yet" failures under CI load. Deliberately does
-// NOT override HOME itself: git/ssh still need the real `~/.gitconfig` (user
-// identity) to create commits.
+// Per-file isolation, so concurrent files never share a global config dir.
+// HOME is deliberately left alone: git still needs the real ~/.gitconfig.
 const isolatedGlobalDir = fs.mkdtempSync(
 	path.join(os.tmpdir(), 'epiq-e2e-global-'),
 );
 
-// Set on the worker's own env (not just the spawned TUI child's) so test
-// files that call epiq-api.js functions directly in-process — e.g. to
-// inspect state a TUI session just wrote — see the same isolated global dir.
+// On the worker's own env too, so in-process API calls see the same dir.
 process.env['EPIQ_GLOBAL_DIR'] = isolatedGlobalDir;
 
 const createTuiEnv = (extra: Record<string, string> = {}) => {
@@ -77,11 +70,37 @@ const createTuiEnv = (extra: Record<string, string> = {}) => {
 const sleep = async (ms: number) =>
 	await new Promise(resolve => setTimeout(resolve, ms));
 
+// Text inside the command-line box, which is the last bordered row of a frame.
+const commandLineContent = (frame: string): string => {
+	const lines = frame.split('\n');
+
+	for (let index = lines.length - 1; index >= 0; index--) {
+		const match = /^│(.*)│$/.exec((lines[index] ?? '').trim());
+		if (match) return (match[1] ?? '').trim();
+	}
+
+	return '';
+};
+
+/**
+ * True when the command line holds no typed command. Not "contains the
+ * placeholder": the caption is absent in some contexts, so waiting on it hangs.
+ */
+export const commandLineIsIdle = (frame: string): boolean => {
+	const content = commandLineContent(frame);
+	return content === '' || content === ': for command line';
+};
+
+const describeWaitTarget = (
+	text: string | RegExp | ((output: string) => boolean),
+): string => {
+	if (typeof text === 'string') return JSON.stringify(text);
+	if (text instanceof RegExp) return String(text);
+	return 'a predicate';
+};
+
 type SetupTuiOptions = {
-	/**
-	 * The caller owns the directory: it is left in place on
-	 * `destroy()` so a follow-up session can replay the persisted event log.
-	 */
+	/** Left in place on `destroy()` so a later session can replay the log. */
 	cwd?: string;
 	/** Extra environment variables for the spawned process (e.g. EDITOR). */
 	env?: Record<string, string>;
@@ -99,6 +118,7 @@ export const setupTui = (
 	let destroyed = false;
 	let renderedOutput = '';
 	let pendingWrites: Promise<void> = Promise.resolve();
+	let lastDataAt = Date.now();
 
 	const terminal = new Terminal({
 		cols: width,
@@ -136,6 +156,7 @@ export const setupTui = (
 	};
 
 	child.onData(data => {
+		lastDataAt = Date.now();
 		pendingWrites = pendingWrites.then(
 			() =>
 				new Promise<void>(resolve => {
@@ -146,6 +167,25 @@ export const setupTui = (
 				}),
 		);
 	});
+
+	// One frame arrives as several PTY chunks, so a predicate can match a
+	// half-drawn screen. Waiting for the stream to fall quiet returns only
+	// complete frames; bounded because the animated sync indicator never stops.
+	const SETTLE_QUIET_MS = 30;
+	const MAX_SETTLE_WAIT_MS = 300;
+
+	const settle = async () => {
+		const settleDeadline = Date.now() + MAX_SETTLE_WAIT_MS;
+
+		while (
+			Date.now() - lastDataAt < SETTLE_QUIET_MS &&
+			Date.now() < settleDeadline
+		) {
+			await sleep(5);
+		}
+
+		await flushOutput();
+	};
 
 	const getOutput = () => renderedOutput;
 
@@ -184,27 +224,39 @@ export const setupTui = (
 
 		waitFor: async (text, timeoutMs = 3_000) => {
 			const startedAt = Date.now();
+			const matches = (output: string) =>
+				typeof text === 'string'
+					? output.includes(text)
+					: text instanceof RegExp
+					? text.test(output)
+					: text(output);
 
 			while (Date.now() - startedAt < timeoutMs) {
 				await flushOutput();
 
-				const currentOutput = getOutput();
+				if (matches(getOutput())) {
+					await settle();
 
-				if (
-					typeof text === 'string'
-						? currentOutput.includes(text)
-						: text instanceof RegExp
-						? text.test(currentOutput)
-						: text(currentOutput)
-				) {
-					return currentOutput;
+					// Re-checked after settling: the frame that matched may have been
+					// a partial one, and the completed frame is the truthful answer
+					// either way.
+					if (matches(getOutput())) return getOutput();
 				}
 
 				await sleep(1);
 			}
 
 			await flushOutput();
-			return getOutput();
+
+			// Throws rather than returning the last frame. Returning it made every
+			// timeout surface as whatever assertion the caller ran next — "expected
+			// '   …' to contain 'This folder is not…'" — which reads like a content
+			// bug in the app instead of a wait that never came true.
+			throw new Error(
+				`Timed out after ${timeoutMs}ms waiting for ${describeWaitTarget(
+					text,
+				)}.\nLast rendered frame:\n${getOutput()}`,
+			);
 		},
 
 		destroy,

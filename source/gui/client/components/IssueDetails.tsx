@@ -1,6 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {CONTENT_FONT, GUI_THEME} from '../lib/gui-theme';
 import {
+	GuiContributor,
 	GuiUser,
 	GuiIssue,
 	GuiTag,
@@ -9,6 +10,7 @@ import {
 } from '../lib/gui-state.model';
 import {Aside} from './Aside';
 import {Button} from './Button';
+import {ManageContributorsModal} from './ManageContributorsModal';
 import {CopyRef} from './CopyRef';
 import {FormHeader} from './FormHeader';
 import {
@@ -39,6 +41,8 @@ export const IssueDetails = ({
 	onAddTag,
 	onRemoveTag,
 	onAddAssignee,
+	onAddExternalAssignee,
+	onRemoveContributor,
 	onRemoveAssignee,
 	onCloseIssue,
 	onReopenIssue,
@@ -50,6 +54,7 @@ export const IssueDetails = ({
 	onDeleteAttachment,
 	knownTags: tags,
 	knownAssignees: assignees,
+	onOpenAssigneePicker,
 }: {
 	whoAmI: GuiUser;
 	issue: GuiIssue | null;
@@ -61,7 +66,9 @@ export const IssueDetails = ({
 	onEditDescription: (issueId: string, description: string) => void;
 	onAddTag: (issueId: string, tagName: string) => void;
 	onRemoveTag: (issueId: string, tagId: string) => void;
-	onAddAssignee: (issueId: string, assigneeName: string) => void;
+	onAddAssignee: (issueId: string, assigneeId: string) => void;
+	onAddExternalAssignee: (issueId: string, assigneeName: string) => void;
+	onRemoveContributor: (contributorId: string) => void;
 	onRemoveAssignee: (issueId: string, assigneeId: string) => void;
 	onCloseIssue: (issueId: string) => void;
 	onReopenIssue: (issueId: string) => void;
@@ -72,12 +79,15 @@ export const IssueDetails = ({
 	onUploadAttachments?: (issueId: string, files: File[]) => void;
 	onDeleteAttachment?: (issueId: string, attachmentId: string) => void;
 	knownTags: GuiTag[];
-	knownAssignees: GuiUser[];
+	knownAssignees: GuiContributor[];
+	// Fired when the picker opens, so the caller can fetch the list only then.
+	onOpenAssigneePicker: () => void;
 }) => {
 	const [title, setTitle] = useState('');
 	const [description, setDescription] = useState('');
 	const [tagName, setTagName] = useState('');
 	const [assigneeName, setAssigneeName] = useState('');
+	const [managingContributors, setManagingContributors] = useState(false);
 	const [editingTitle, setEditingTitle] = useState(false);
 	const [editingDescription, setEditingDescription] = useState(false);
 	const [addingTag, setAddingTag] = useState(false);
@@ -178,7 +188,7 @@ export const IssueDetails = ({
 	const addAssignee = () => {
 		if (disabled || !issue || !assigneeName.trim()) return;
 
-		onAddAssignee(issue.id, assigneeName.trim());
+		onAddExternalAssignee(issue.id, assigneeName.trim());
 		setAssigneeName('');
 		setAddingAssignee(false);
 	};
@@ -187,10 +197,23 @@ export const IssueDetails = ({
 		tag => !issue?.tags.some(issueTag => issueTag.id === tag.id),
 	);
 
-	const availableAssignees = assignees.filter(
-		assignee =>
-			!issue?.assignees.some(issueAssignee => issueAssignee.id === assignee.id),
-	);
+	// You first, then board contributors, then outsiders.
+	const assigneeRank = (assignee: GuiContributor): number =>
+		assignee.isSelf ? 0 : assignee.hasAuthoredAnywhere ? 1 : 2;
+
+	const availableAssignees = assignees
+		.filter(
+			assignee =>
+				!issue?.assignees.some(
+					issueAssignee => issueAssignee.id === assignee.id,
+				),
+		)
+		// A tombstoned contributor has no name left to pick them out by.
+		.filter(assignee => !assignee.isRemoved)
+		.sort(
+			(a, b) =>
+				assigneeRank(a) - assigneeRank(b) || a.name.localeCompare(b.name),
+		);
 
 	return (
 		<Aside ref={panelRef}>
@@ -414,7 +437,10 @@ export const IssueDetails = ({
 									(!issue.readonly && !addingAssignee && (
 										<Button
 											variant="ghost"
-											onClick={() => setAddingAssignee(true)}
+											onClick={() => {
+												setAddingAssignee(true);
+												onOpenAssigneePicker();
+											}}
 										>
 											+
 										</Button>
@@ -455,22 +481,54 @@ export const IssueDetails = ({
 												key={assignee.id}
 												variant="chip"
 												disabled={issue.readonly}
-												onClick={() => onAddAssignee(issue.id, assignee.name)}
-												title="Add existing assignee"
-												style={{color: assignee.color, opacity: 0.55}}
+												onClick={() => onAddAssignee(issue.id, assignee.id)}
+												title={
+													assignee.isSelf
+														? 'Assign yourself'
+														: !assignee.hasAuthoredAnywhere
+														? 'Has not contributed to this project'
+														: 'Add existing assignee'
+												}
+												style={{
+													color: assignee.isSelf
+														? GUI_THEME.accent
+														: assignee.color,
+													opacity: assignee.isSelf ? 1 : 0.55,
+													fontWeight: assignee.isSelf ? 600 : undefined,
+													borderColor: assignee.isSelf
+														? GUI_THEME.accent
+														: undefined,
+												}}
 											>
-												+ @{assignee.name}
+												+ @{assignee.isSelf ? 'me' : assignee.name}
+												{!assignee.hasAuthoredAnywhere ? ' ↗' : ''}
 											</Button>
 										))}
 									</ChipRow>
 								)}
+
+								{addingAssignee &&
+									assignees.some(
+										a => !a.hasAuthoredAnywhere && !a.isRemoved,
+									) && (
+										<ChipRow>
+											<Button
+												variant="ghost"
+												disabled={issue.readonly}
+												onClick={() => setManagingContributors(true)}
+												title="Review and remove external contributors across the whole workspace"
+											>
+												manage contributors…
+											</Button>
+										</ChipRow>
+									)}
 
 								{addingAssignee && (
 									<AddRow>
 										<Input
 											value={assigneeName}
 											autoFocus
-											placeholder="assignee name"
+											placeholder="name of unknown contributor"
 											onChange={event => setAssigneeName(event.target.value)}
 											onKeyDown={event => {
 												if (event.key === 'Enter') addAssignee();
@@ -481,7 +539,12 @@ export const IssueDetails = ({
 											}}
 										/>
 
-										<Button onClick={addAssignee}>add</Button>
+										<Button
+											onClick={addAssignee}
+											title="Add someone who has not contributed to this board"
+										>
+											add
+										</Button>
 									</AddRow>
 								)}
 							</Section>
@@ -498,7 +561,8 @@ export const IssueDetails = ({
 							<Section
 								title="Actions"
 								action={
-									issue.isClosed ? (
+									!issue.readonly &&
+									(issue.isClosed ? (
 										<Button onClick={() => onReopenIssue(issue.id)}>
 											reopen issue
 										</Button>
@@ -506,7 +570,7 @@ export const IssueDetails = ({
 										<Button onClick={() => onCloseIssue(issue.id)}>
 											close issue
 										</Button>
-									)
+									))
 								}
 							>
 								{''}
@@ -527,6 +591,14 @@ export const IssueDetails = ({
 				</>
 			) : (
 				<Empty>Select an issue</Empty>
+			)}
+
+			{managingContributors && (
+				<ManageContributorsModal
+					contributors={assignees}
+					onRemove={onRemoveContributor}
+					onClose={() => setManagingContributors(false)}
+				/>
 			)}
 		</Aside>
 	);

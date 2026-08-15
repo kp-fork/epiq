@@ -10,6 +10,7 @@ import {loadMergedEvents} from '../lib/event/event-load.js';
 import {materializeAndPersistAll} from '../lib/event/event-materialize-and-persist.js';
 import {getPersistFileName} from '../lib/event/event-persist.js';
 import {AppEvent, MovePosition} from '../lib/event/event.model.js';
+import {filterEventsForBoard} from './epiq-time-travel.js';
 import {resolveReopenParentFromLog} from '../lib/event/log-utils.js';
 import {CLOSED_SWIMLANE_ID} from '../lib/event/static-ids.js';
 import {
@@ -29,6 +30,11 @@ import {
 import {getSafeState} from '../lib/state/state.js';
 import {setSynced, setSyncFailed, setSyncing} from '../lib/state/sync-state.js';
 import {resolveClosestEpiqProjectRoot} from '../lib/storage/paths.js';
+import {
+	Contributor,
+	REMOVED_CONTRIBUTOR_NAME,
+} from '../lib/model/app-state.model.js';
+import {preferBestName} from '../lib/utils/contributor.utils.js';
 import {getStringColor} from '../lib/utils/color.js';
 import {nodeRef} from '../lib/utils/node-ref.js';
 import {sanitizeInlineText} from '../lib/utils/string.utils.js';
@@ -39,7 +45,13 @@ import {
 	writeAttachmentBlob,
 } from '../lib/media/media-store.js';
 import {logger} from '../logger.js';
-import {ApiIssue, ApiState, ApiSwimlane} from './api-state.model.js';
+import {
+	ApiAssignee,
+	ApiIssue,
+	ApiState,
+	ApiSwimlane,
+} from './api-state.model.js';
+import {getTimeTravelStatus} from './epiq-time-travel.js';
 
 type ToolInput = {
 	repoRoot?: string;
@@ -126,7 +138,15 @@ type RemoveIssueTagInput = ToolInput & {
 
 type AddIssueAssigneeInput = ToolInput & {
 	issueId: string;
-	assigneeName: string;
+	assigneeId?: string;
+	// Resolves to the config userId, the same identity that authors events.
+	self?: boolean;
+	// Names a person with no contributor record yet; a near-miss spelling makes
+	// a second, near-identical contributor.
+	assigneeName?: string;
+	// Required to create somebody new from a name; without it an unmatched name
+	// is refused rather than minting a contributor.
+	createUnlinked?: boolean;
 };
 
 type RemoveIssueAssigneeInput = ToolInput & {
@@ -198,9 +218,7 @@ const boot = async (
 		return failed(ensureWorktreeResult.message);
 	}
 
-	// MCP tools default to local-only. Fetching remote state
-	// is explicit via the `sync` tool; `getGuiState` opts back in for the
-	// GUI's own autosync loop.
+	// MCP tools are local-only by default; fetching remote state is explicit.
 	if (options?.pull ?? false) {
 		const pullResult = await execGit({
 			cwd: stateBranchRootResult.value,
@@ -256,18 +274,69 @@ const getIssueTags = (ticket: Ticket) =>
 			color: getStringColor(tag.name),
 		}));
 
-const getIssueAssignees = (ticket: Ticket) =>
+// A contributor node's name is written once at create.contributor and never
+// updated; the event log carries the current one.
+const getLatestNamesFromLog = (): Map<string, string> => {
+	const stateResult = getSafeState();
+	const eventLog = isFail(stateResult) ? [] : stateResult.value.eventLog ?? [];
+	const byId = new Map<string, string>();
+
+	for (const event of eventLog) {
+		if (event.userId && event.userName) byId.set(event.userId, event.userName);
+	}
+
+	return byId;
+};
+
+// Shared so that every surface offering or matching a contributor agrees on the
+// answer; disagreement mints duplicate ids for the same person.
+const mergeRegistryNames = (
+	logNames: Map<string, string>,
+	registry: Record<string, Contributor>,
+): Map<string, string> => {
+	const byId = new Map(logNames);
+
+	for (const contributor of Object.values(registry)) {
+		// Overwrites rather than fills a gap: their events still carry the name
+		// they authored under, so the log must never win here.
+		if (contributor.tombstoned) {
+			byId.set(contributor.id, contributor.name);
+			continue;
+		}
+
+		// The log's copy is a sanitized file name segment, so it wins only when
+		// it is a genuinely different name, not the same one spelled worse.
+		byId.set(
+			contributor.id,
+			preferBestName(contributor.name, byId.get(contributor.id)) ??
+				contributor.name,
+		);
+	}
+
+	return byId;
+};
+
+const getIssueAssignees = (
+	ticket: Ticket,
+	latestNames: Map<string, string> = new Map(),
+) =>
 	(ticket.props.assignees ?? [])
 		.map(assignee => nodeRepo.getContributor(assignee))
 		.filter(contributor => contributor != undefined)
-		.map(
-			contributor =>
-				({
-					id: contributor.id,
-					name: contributor.name,
-					color: getStringColor(contributor.name),
-				} satisfies ApiIssue['assignees'][number]),
-		);
+		.map(contributor => {
+			// Unconditional for a tombstoned contributor: the log must never be able
+			// to put a cleared name back.
+			const name = contributor.tombstoned
+				? contributor.name
+				: preferBestName(contributor.name, latestNames.get(contributor.id)) ??
+				  contributor.name;
+
+			return {
+				id: contributor.id,
+				name,
+				color: getStringColor(name),
+			} satisfies ApiIssue['assignees'][number];
+		});
 
 export const listBoards = async (input: ToolInput = {}) => {
 	const bootResult = await boot(input.repoRoot, {pull: false});
@@ -318,6 +387,7 @@ export const listIssues = async (input: ListIssuesInput) => {
 	if (isFail(stateResult)) return stateResult;
 
 	const nodes = stateResult.value.nodes;
+	const latestNames = getLatestNamesFromLog();
 
 	const issues: ApiIssue[] = Object.values(nodes)
 		.filter(isTicketNode)
@@ -339,7 +409,7 @@ export const listIssues = async (input: ListIssuesInput) => {
 					isClosed: n.parentNodeId === CLOSED_SWIMLANE_ID,
 					readonly: Boolean(n.readonly),
 					tags: getIssueTags(n),
-					assignees: getIssueAssignees(n),
+					assignees: getIssueAssignees(n, latestNames),
 				} satisfies ApiIssue),
 		);
 
@@ -848,20 +918,18 @@ export const getEpiqState = async (input: ToolInput = {}) => {
 	});
 };
 
-export const getGuiState = async (
-	input: ToolInput = {},
-): Promise<Result<ApiState>> => {
-	// Unlike the other MCP tools above, the GUI's autosync loop relies on
-	// this pull to keep multi-user state fresh in near-real-time — do not
-	// disable it here (see api-autosync.ts).
-	const bootResult = await boot(input.repoRoot, {pull: true});
-	if (isFail(bootResult)) return bootResult;
-
+// Reads whatever is currently materialized, live or a historical checkout. Must
+// never boot: booting discards an active time-travel checkout.
+export const deriveGuiState = (): Result<ApiState> => {
 	const stateResult = getStateResult();
 	if (isFail(stateResult)) return stateResult;
 
+	const timeTravel = getTimeTravelStatus();
+	const forceReadonly = timeTravel.mode !== 'live';
+
 	const nodes = Object.values(stateResult.value.nodes);
 	const boards = nodes.filter(n => isBoardNode(n) && !n.isDeleted);
+	const latestNames = getLatestNamesFromLog();
 
 	const swimlanesByBoardId = new Map<string, Swimlane[]>();
 	const ticketsBySwimlaneId = new Map<string, Ticket[]>();
@@ -949,7 +1017,7 @@ export const getGuiState = async (
 							({
 								id: swimlane.id,
 								title: swimlane.title,
-								readonly: Boolean(swimlane.readonly),
+								readonly: Boolean(swimlane.readonly) || forceReadonly,
 								issues: (ticketsBySwimlaneId.get(swimlane.id) ?? [])
 									.sort((a, b) => a.rank.localeCompare(b.rank))
 									.map(issue => ({
@@ -957,9 +1025,9 @@ export const getGuiState = async (
 										ref: nodeRef(issue.id),
 										title: sanitizeInlineText(issue.title),
 										description: issue.props.description ?? '',
-										readonly: Boolean(issue.readonly),
+										readonly: Boolean(issue.readonly) || forceReadonly,
 										tags: getIssueTags(issue),
-										assignees: getIssueAssignees(issue),
+										assignees: getIssueAssignees(issue, latestNames),
 										parentNodeId: issue.parentNodeId!,
 										isClosed: issue.parentNodeId === CLOSED_SWIMLANE_ID,
 									})),
@@ -983,7 +1051,25 @@ export const getGuiState = async (
 		commentsByIssueId,
 		attachmentsByIssueId,
 		attachmentMaxKb: getAttachmentMaxKb(),
+		timeTravel,
 	} satisfies ApiState);
+};
+
+export const getGuiState = async (
+	input: ToolInput = {},
+): Promise<Result<ApiState>> => {
+	// Fast path; the guarantee that a checkout survives a boot lives in
+	// `bootStateFromEventLog`, not here.
+	if (getTimeTravelStatus().mode !== 'live') {
+		return deriveGuiState();
+	}
+
+	// Never pull on a read: it would hang sandboxed or offline setups. Freshness
+	// is an explicit periodic sync's job.
+	const bootResult = await boot(input.repoRoot, {pull: false});
+	if (isFail(bootResult)) return bootResult;
+
+	return deriveGuiState();
 };
 
 export const editIssueDescription = async (
@@ -1194,6 +1280,23 @@ export const removeIssueTag = async (input: RemoveIssueTagInput) => {
 	});
 };
 
+const findEventLogAuthor = async (
+	stateBranchRoot: string,
+	userId: string,
+): Promise<{id: string; name: string} | undefined> => {
+	const eventsResult = loadMergedEvents(stateBranchRoot);
+	if (isFail(eventsResult)) return undefined;
+
+	let name: string | undefined;
+
+	// Last write wins: a display name changes over time, the id does not.
+	for (const event of eventsResult.value) {
+		if (event.userId === userId) name = event.userName ?? name;
+	}
+
+	return name === undefined ? undefined : {id: userId, name};
+};
+
 export const addIssueAssignee = async (input: AddIssueAssigneeInput) => {
 	const bootResult = await boot(input.repoRoot, {pull: false});
 	if (isFail(bootResult)) return bootResult;
@@ -1210,17 +1313,96 @@ export const addIssueAssignee = async (input: AddIssueAssigneeInput) => {
 	if (!isTicketNode(issue)) return failed('Assign target must be an issue');
 	if (issue.readonly) return failed('Cannot assign readonly issue');
 
-	const assigneeName = sanitizeInlineText(input.assigneeName).trim();
-	if (!assigneeName) return failed('Assignee name cannot be empty');
+	const targetId = input.self ? actorResult.value.userId : input.assigneeId;
 
-	const existingAssignee = Object.values(stateResult.value.contributors).find(
-		contributor => contributor.name === assigneeName,
+	// An id names a specific person, so an unknown one is an error rather than
+	// an invitation to invent a contributor.
+	if (targetId) {
+		const registered = stateResult.value.contributors[targetId];
+
+		// A contributor node is only written when somebody is explicitly created
+		// or assigned, so an author who was never assigned is absent from the
+		// registry. Register them under the id they already author with.
+		const authored = registered
+			? undefined
+			: await findEventLogAuthor(bootResult.value.stateBranchRoot, targetId);
+
+		if (!registered && !authored) return failed('Unknown assignee id');
+
+		const assignee = registered ?? authored!;
+
+		const events = [
+			...(registered
+				? []
+				: [
+						{
+							id: ulid(),
+							...actorResult.value,
+							action: 'create.contributor',
+							payload: {id: assignee.id, name: assignee.name},
+						} satisfies AppEvent<'create.contributor'>,
+				  ]),
+			{
+				id: ulid(),
+				...actorResult.value,
+				action: 'add.issue.assignee',
+				payload: {id: input.issueId, assignee: assignee.id},
+			} satisfies AppEvent<'add.issue.assignee'>,
+		];
+
+		const assignResults = materializeAndPersistAll(
+			events,
+			bootResult.value.stateBranchRoot,
+		);
+
+		if (isFail(assignResults)) return failed(assignResults.message);
+
+		return succeeded('Added issue assignee', {
+			id: input.issueId,
+			assignee: {id: assignee.id, name: assignee.name},
+		});
+	}
+
+	const assigneeName = sanitizeInlineText(input.assigneeName ?? '').trim();
+	if (!assigneeName) return failed('Provide assigneeId, self or assigneeName');
+
+	// Registry *and* event log, so this matches the same union a picker offers;
+	// the registry alone reports log-only authors as unknown.
+	const candidates = mergeRegistryNames(
+		getLatestNamesFromLog(),
+		stateResult.value.contributors,
 	);
 
-	const assigneeId = existingAssignee?.id ?? ulid();
+	const matches = [...candidates.entries()].filter(
+		([, candidateName]) => candidateName === assigneeName,
+	);
+
+	// Two people can share a display name; picking one silently assigns the
+	// wrong person half the time.
+	if (matches.length > 1) {
+		return failed(
+			`"${assigneeName}" matches ${matches.length} contributors (${matches
+				.map(([id]) => id)
+				.join(', ')}). Assign by assigneeId to choose.`,
+		);
+	}
+
+	const match = matches[0];
+
+	if (!match && !input.createUnlinked) {
+		return failed(
+			`No contributor named "${assigneeName}". Assign by id, or pass createUnlinked to add them as an external assignee.`,
+		);
+	}
+
+	const [assigneeId = ulid(), resolvedName = assigneeName] = match ?? [];
+
+	// Keyed on the registry, not on whether a name matched: somebody found only
+	// in the event log still needs a contributor record.
+	const isRegistered = Boolean(stateResult.value.contributors[assigneeId]);
 
 	const events = [
-		...(existingAssignee
+		...(isRegistered
 			? []
 			: [
 					{
@@ -1229,7 +1411,7 @@ export const addIssueAssignee = async (input: AddIssueAssigneeInput) => {
 						action: 'create.contributor',
 						payload: {
 							id: assigneeId,
-							name: assigneeName,
+							name: resolvedName,
 						},
 					} satisfies AppEvent<'create.contributor'>,
 			  ]),
@@ -1253,8 +1435,205 @@ export const addIssueAssignee = async (input: AddIssueAssigneeInput) => {
 
 	return succeeded('Added issue assignee', {
 		id: input.issueId,
-		assignee: {id: assigneeId, name: assigneeName},
+		assignee: {id: assigneeId, name: resolvedName},
 	});
+};
+
+// Tombstone, not deletion: the id and every reference to it survive, so only
+// the display name stops rendering. Refused for anyone who has authored an
+// event, since the log names them throughout and is never rewritten.
+export const tombstoneContributor = async (
+	input: ToolInput & {contributorId: string},
+): Promise<Result<{id: string; name: string}>> => {
+	const bootResult = await boot(input.repoRoot, {pull: false});
+	if (isFail(bootResult)) return bootResult;
+
+	const actorResult = getActor();
+	if (isFail(actorResult)) return actorResult;
+
+	const stateResult = getStateResult();
+	if (isFail(stateResult)) return stateResult;
+
+	const contributor = stateResult.value.contributors[input.contributorId];
+	if (!contributor) return failed('Contributor not found');
+
+	const authored = await findEventLogAuthor(
+		bootResult.value.stateBranchRoot,
+		input.contributorId,
+	);
+
+	if (authored) {
+		return failed(
+			'Cannot remove a contributor who has authored events — their name appears throughout the log',
+		);
+	}
+
+	const events = [
+		{
+			id: ulid(),
+			...actorResult.value,
+			action: 'tombstone.contributor',
+			payload: {id: input.contributorId},
+		} satisfies AppEvent<'tombstone.contributor'>,
+	];
+
+	const results = materializeAndPersistAll(
+		events,
+		bootResult.value.stateBranchRoot,
+	);
+
+	if (isFail(results)) return failed(results.message);
+
+	return succeeded('Tombstoned contributor', {
+		id: input.contributorId,
+		name: REMOVED_CONTRIBUTOR_NAME,
+	});
+};
+
+// Removal never rewrites the log, so the `create.contributor` payload still
+// carries the original name. Last write wins.
+const findCreatedContributorName = async (
+	stateBranchRoot: string,
+	contributorId: string,
+): Promise<string | undefined> => {
+	const eventsResult = loadMergedEvents(stateBranchRoot);
+	if (isFail(eventsResult)) return undefined;
+
+	let name: string | undefined;
+
+	for (const event of eventsResult.value) {
+		if (event.action !== 'create.contributor') continue;
+
+		const payload = event.payload as {id?: string; name?: string};
+		if (payload.id === contributorId && payload.name) name = payload.name;
+	}
+
+	return name;
+};
+
+// The removal guard only sees the log this machine has pulled, so somebody
+// whose events have not arrived yet can be cleared by mistake. This makes that
+// reversible rather than forcing a network round-trip inside a read path.
+export const restoreContributor = async (
+	input: ToolInput & {contributorId: string},
+): Promise<Result<{id: string; name: string}>> => {
+	const bootResult = await boot(input.repoRoot, {pull: false});
+	if (isFail(bootResult)) return bootResult;
+
+	const actorResult = getActor();
+	if (isFail(actorResult)) return actorResult;
+
+	const stateResult = getStateResult();
+	if (isFail(stateResult)) return stateResult;
+
+	const contributor = stateResult.value.contributors[input.contributorId];
+	if (!contributor) return failed('Contributor not found');
+
+	if (!contributor.tombstoned) {
+		return failed('Contributor is not tombstoned');
+	}
+
+	const originalName = await findCreatedContributorName(
+		bootResult.value.stateBranchRoot,
+		input.contributorId,
+	);
+
+	if (!originalName) {
+		return failed(
+			'Cannot restore this contributor — no original name found in the event log',
+		);
+	}
+
+	const events = [
+		{
+			id: ulid(),
+			...actorResult.value,
+			action: 'restore.contributor',
+			payload: {id: input.contributorId, name: originalName},
+		} satisfies AppEvent<'restore.contributor'>,
+	];
+
+	const results = materializeAndPersistAll(
+		events,
+		bootResult.value.stateBranchRoot,
+	);
+
+	if (isFail(results)) return failed(results.message);
+
+	return succeeded('Restored contributor', {
+		id: input.contributorId,
+		name: originalName,
+	});
+};
+
+export const getBoardContributors = async (
+	input: ToolInput & {boardId?: string} = {},
+): Promise<
+	Result<
+		(ApiAssignee & {
+			isSelf: boolean;
+			isExternal: boolean;
+			isRemoved: boolean;
+			hasAuthoredAnywhere: boolean;
+		})[]
+	>
+> => {
+	const bootResult = await boot(input.repoRoot, {pull: false});
+	if (isFail(bootResult)) return bootResult;
+
+	const actorResult = getActor();
+	if (isFail(actorResult)) return actorResult;
+
+	const stateResult = getStateResult();
+	if (isFail(stateResult)) return stateResult;
+
+	const eventsResult = loadMergedEvents(bootResult.value.stateBranchRoot);
+	if (isFail(eventsResult)) return failed(eventsResult.message);
+
+	const scopedEvents = input.boardId
+		? filterEventsForBoard(eventsResult.value, input.boardId)
+		: eventsResult.value;
+
+	// Last write wins: events arrive in chronological order.
+	const byId = new Map<string, string>();
+	// Board-scoped, and kept apart from the merged map so the union below cannot
+	// erase "has actually worked on this board".
+	const authorIds = new Set<string>();
+
+	// Unfiltered, unlike `authorIds`: removal is refused for anyone who has
+	// authored anywhere, so this must read the same events that guard does.
+	const workspaceAuthorIds = new Set<string>();
+
+	for (const event of eventsResult.value) {
+		if (event.userId) workspaceAuthorIds.add(event.userId);
+	}
+
+	for (const event of scopedEvents) {
+		if (!event.userId) continue;
+
+		byId.set(event.userId, event.userName ?? '');
+		authorIds.add(event.userId);
+	}
+
+	const registry = stateResult.value.contributors;
+	const namesById = mergeRegistryNames(byId, registry);
+
+	const contributors = [...namesById.entries()].map(([id, name]) => ({
+		id,
+		name,
+		color: getStringColor(name),
+		isSelf: id === actorResult.value.userId,
+		// Board-scoped: means "has not worked on this board", not "is not in the
+		// history". Never stored, so it self-corrects.
+		isExternal: !authorIds.has(id),
+		// Read off the record, not compared against the placeholder name, so
+		// somebody genuinely called "removed" is not reported as already removed.
+		isRemoved: registry[id]?.tombstoned === true,
+		// Workspace-wide: their name is in the log, which is what blocks removal.
+		hasAuthoredAnywhere: workspaceAuthorIds.has(id),
+	}));
+
+	return succeeded('Listed board contributors', contributors);
 };
 
 export const removeIssueAssignee = async (input: RemoveIssueAssigneeInput) => {
@@ -1545,9 +1924,8 @@ export const deleteIssueAttachment = async (
 };
 
 /**
- * Resolves a content-addressed blob for serving. Validation (name shape,
- * hash match, magic bytes) happens inside resolveAttachmentBlob — synced
- * blobs are untrusted input.
+ * Synced blobs are untrusted input; `resolveAttachmentBlob` does the name,
+ * hash, and magic-byte validation.
  */
 export const getAttachmentBlob = async (input: GetAttachmentBlobInput) => {
 	const bootResult = await boot(input.repoRoot, {pull: false});

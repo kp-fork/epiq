@@ -3,6 +3,10 @@ import React from 'react';
 import {TagColor, TAGS_DEFAULT, TagsDefault} from '../static/default-tags.js';
 import {stringToHslHexColor} from '../utils/color.js';
 import {nodeRepo} from '../repository/node-repo.js';
+import {
+	getContributorDisplayName,
+	hasAuthoredEvents,
+} from '../utils/contributor.utils.js';
 
 type Props = {
 	id: string;
@@ -23,9 +27,13 @@ export const getStringColor = (
 export const AssigneeUI: React.FC<Props> = ({id, isSelected}) => {
 	const contributor = nodeRepo.getContributor(id);
 	if (!contributor) return;
+
+	const name = getContributorDisplayName(id, contributor.name);
+
 	return (
-		<Text underline={isSelected} color={getStringColor(contributor.name)}>
-			{'@' + contributor.name}
+		<Text underline={isSelected} color={getStringColor(name)}>
+			{'@' + name}
+			{hasAuthoredEvents(id) ? '' : '↗'}
 		</Text>
 	);
 };

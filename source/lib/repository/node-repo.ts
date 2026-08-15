@@ -3,6 +3,7 @@ import {
 	CommentState,
 	Contributor,
 	Tag,
+	REMOVED_CONTRIBUTOR_NAME,
 } from '../model/app-state.model.js';
 import {AnyContext, isTicketNode} from '../model/context.model.js';
 import {NavNode} from '../model/navigation-node.model.js';
@@ -310,6 +311,7 @@ export const nodeRepo = {
 		const {contributors} = getState();
 
 		return [
+			'me',
 			...new Set(
 				Object.values(contributors)
 					.map(node => node.name)
@@ -396,6 +398,53 @@ export const nodeRepo = {
 		patchState({nodes: nextNodes});
 
 		return succeeded('Successfully tomb stoned', node);
+	},
+
+	// Clears the display name but keeps the record, so assignments referencing
+	// the id keep resolving. Unconditional: the rule that only contributors who
+	// have never authored an event may be tombstoned lives in the caller.
+	tombstoneContributor(contributorId: string): Result<Contributor> {
+		const contributor = this.getContributor(contributorId);
+		if (!contributor) return failed('Contributor not found');
+
+		const tombstoned: Contributor = {
+			...contributor,
+			name: REMOVED_CONTRIBUTOR_NAME,
+			tombstoned: true,
+		};
+
+		const result = updateState(s => ({
+			...s,
+			contributors: {
+				...s.contributors,
+				[contributorId]: tombstoned,
+			},
+		}));
+
+		if (isFail(result)) return failed('Unable to remove contributor');
+		return succeeded('Tombstoned contributor', tombstoned);
+	},
+
+	restoreContributor(contributorId: string, name: string): Result<Contributor> {
+		const contributor = this.getContributor(contributorId);
+		if (!contributor) return failed('Contributor not found');
+
+		const restored: Contributor = {
+			...contributor,
+			name,
+			tombstoned: false,
+		};
+
+		const result = updateState(s => ({
+			...s,
+			contributors: {
+				...s.contributors,
+				[contributorId]: restored,
+			},
+		}));
+
+		if (isFail(result)) return failed('Unable to restore contributor');
+		return succeeded('Restored contributor', restored);
 	},
 
 	createContributor(contributor: Contributor): Result<Contributor> {

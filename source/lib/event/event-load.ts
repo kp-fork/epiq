@@ -22,13 +22,35 @@ type PersistedPayloadMap = {
 	[K in keyof AppEventMap]: AppEventMap[K]['payload'];
 };
 
+// File names are lowercased on the way to disk, but contributor records keep
+// the uppercase `ulid()` id, so a lowercased userId splits one person in two.
+// Restoring the canonical casing is lossless for ULIDs; anything else is left
+// alone rather than guessed at.
+const ULID_SHAPE = /^[0-9a-hjkmnp-tv-z]{26}$/i;
+
+const canonicalUserId = (userId: string): string =>
+	ULID_SHAPE.test(userId) ? userId.toUpperCase() : userId;
+
 const parseEventFileActor = (
 	filePath: string,
 ): Result<{userId: string; userName: string}> => {
-	const [userId, userName] = path.basename(filePath, '.jsonl').split('.');
+	const baseName = path.basename(filePath, '.jsonl');
+
+	// Split on the FIRST '.' only. '.' survives sanitizing, so a user name may
+	// contain any number of them ("J. Lampa" -> `<id>.j.-lampa`), while the id
+	// segment never can.
+	const separatorIndex = baseName.indexOf('.');
+	const userId =
+		separatorIndex === -1 ? baseName : baseName.slice(0, separatorIndex);
+	// Undefined, not '', so the schema's 'unknown' default applies rather than
+	// tripping its min(1).
+	const userName =
+		separatorIndex === -1 ? undefined : baseName.slice(separatorIndex + 1);
 
 	const result = EventFileNameSchema.safeParse({
-		userId,
+		// Id only: the name segment is compared against a re-encoded (lowercased)
+		// registry name, so changing its case would break that match.
+		userId: canonicalUserId(userId),
 		userName,
 	});
 

@@ -5,6 +5,7 @@ import {
 	Result,
 	succeeded,
 } from '../../lib/model/result-types.js';
+import {REMOVED_CONTRIBUTOR_NAME} from '../../lib/model/app-state.model.js';
 import {NavNode} from '../../lib/model/navigation-node.model.js';
 import {AnyContext} from '../../lib/model/context.model.js';
 
@@ -69,6 +70,8 @@ vi.mock('../../lib/storage/paths.js', async importOriginal => {
 vi.mock('../../lib/event/event-load.js', () => ({
 	loadMergedEvents: vi.fn(() => succeeded('loaded', [])),
 }));
+
+const eventLoadModule = await import('../../lib/event/event-load.js');
 
 vi.mock('../../lib/event/event-boot.js', () => ({
 	bootStateFromEventLog: vi.fn(() => succeeded('booted', null)),
@@ -232,6 +235,47 @@ const nodes: Record<string, Partial<NavNode<AnyContext>>> = {
 	},
 };
 
+// Mutable; reset in beforeEach.
+const contributorRegistry: Record<
+	string,
+	{id: string; name: string; tombstoned?: boolean}
+> = {
+	'contributor-1': {id: 'contributor-1', name: 'Alice'},
+};
+
+const DEFAULT_CONTRIBUTOR_REGISTRY = {
+	'contributor-1': {id: 'contributor-1', name: 'Alice'},
+};
+
+// The *state* event log, distinct from the merged on-disk log loadMergedEvents
+// supplies. Name resolution reads this one.
+const DEFAULT_STATE_EVENT_LOG = [
+	{
+		id: 'comment-event-1',
+		userId: 'user-1',
+		userName: 'Alice',
+		action: 'add.issue.comment',
+		payload: {
+			id: 'comment-1',
+			issue: 'issue-1',
+			md: 'A comment',
+			author: 'user-1',
+		},
+	},
+];
+
+let stateEventLog: unknown[] = [...DEFAULT_STATE_EVENT_LOG];
+
+const resetContributorFixtures = () => {
+	for (const key of Object.keys(contributorRegistry))
+		delete contributorRegistry[key];
+	Object.assign(
+		contributorRegistry,
+		structuredClone(DEFAULT_CONTRIBUTOR_REGISTRY),
+	);
+	stateEventLog = [...DEFAULT_STATE_EVENT_LOG];
+};
+
 vi.mock('../../lib/state/state.js', async importOriginal => {
 	const actual = await importOriginal<
 		typeof import('../../lib/state/state.js')
@@ -248,23 +292,8 @@ vi.mock('../../lib/state/state.js', async importOriginal => {
 				tags: {
 					'tag-1': {id: 'tag-1', name: 'bug'},
 				},
-				contributors: {
-					'contributor-1': {id: 'contributor-1', name: 'Alice'},
-				},
-				eventLog: [
-					{
-						id: 'comment-event-1',
-						userId: 'user-1',
-						userName: 'Alice',
-						action: 'add.issue.comment',
-						payload: {
-							id: 'comment-1',
-							issue: 'issue-1',
-							md: 'A comment',
-							author: 'user-1',
-						},
-					},
-				],
+				contributors: contributorRegistry,
+				eventLog: stateEventLog,
 				syncStatus: {
 					status: 'synced',
 					msg: 'Synced',
@@ -283,10 +312,19 @@ vi.mock('../../lib/repository/node-repo.js', () => ({
 		getTag: vi.fn((id: string) =>
 			id === 'tag-1' ? {id: 'tag-1', name: 'bug'} : undefined,
 		),
-		getContributor: vi.fn((id: string) =>
-			id === 'contributor-1' ? {id: 'contributor-1', name: 'Alice'} : undefined,
-		),
+		getContributor: vi.fn((id: string) => contributorRegistry[id]),
+		getCommentsByIssue: vi.fn(() => []),
+		getAttachmentsByIssue: vi.fn(() => []),
 	},
+}));
+
+vi.mock('../epiq-time-travel.js', () => ({
+	getTimeTravelStatus: vi.fn(() => ({mode: 'live', asOfTime: null})),
+	// Stand-in for the real tree walk; fixtures carry boardId on the payload.
+	filterEventsForBoard: vi.fn(
+		(events: {payload?: {boardId?: string}}[], boardId: string) =>
+			events.filter(event => event.payload?.boardId === boardId),
+	),
 }));
 
 vi.mock('../../lib/event/common-events.js', () => ({
@@ -310,6 +348,7 @@ vi.mock('../../lib/event/common-events.js', () => ({
 
 let tools: typeof import('../epiq-api.js');
 let persistModule: typeof import('../../lib/event/event-materialize-and-persist.js');
+let timeTravelModule: typeof import('../epiq-time-travel.js');
 let gitUtilsModule: typeof import('../../git/git-utils.js');
 
 beforeAll(async () => {
@@ -317,12 +356,14 @@ beforeAll(async () => {
 	persistModule = await import(
 		'../../lib/event/event-materialize-and-persist.js'
 	);
+	timeTravelModule = await import('../epiq-time-travel.js');
 	gitUtilsModule = await import('../../git/git-utils.js');
 });
 
 describe('mcp tools', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		resetContributorFixtures();
 	});
 
 	it('lists boards', async () => {
@@ -688,9 +729,6 @@ describe('mcp tools', () => {
 			});
 		}
 
-		// One combined batch: add.issue, edit.description, add.issue.tag (bug
-		// already exists), create.tag + add.issue.tag (urgent), add.issue.assignee
-		// (Alice already exists), create.contributor + add.issue.assignee (Bob).
 		expect(persistModule.materializeAndPersistAll).toHaveBeenCalledTimes(1);
 		const [events] = vi.mocked(persistModule.materializeAndPersistAll).mock
 			.calls[0]!;
@@ -800,6 +838,26 @@ describe('mcp tools', () => {
 			expect(result.value.rootNodeId).toBe('workspace-1');
 			expect(result.value.nodes).toBe(nodes);
 		}
+	});
+
+	it('gets GUI state without re-booting (pulling/re-materializing live) while time-travel is active', async () => {
+		vi.mocked(timeTravelModule.getTimeTravelStatus).mockReturnValueOnce({
+			mode: 'scrub',
+			asOfTime: 123,
+		});
+
+		const result = await tools.getGuiState({repoRoot: '/repo'});
+
+		expect(isFail(result)).toBe(false);
+		// No git call means no boot, which is what proves the checkout survived.
+		expect(gitUtilsModule.execGit).not.toHaveBeenCalled();
+	});
+
+	it('boots (re-materializes live) normally when not time-traveling, without pulling', async () => {
+		const result = await tools.getGuiState({repoRoot: '/repo'});
+
+		expect(isFail(result)).toBe(false);
+		expect(gitUtilsModule.execGit).not.toHaveBeenCalled();
 	});
 
 	it('edits an issue title', async () => {
@@ -914,11 +972,12 @@ describe('mcp tools', () => {
 		}
 	});
 
-	it('adds a new assignee to an issue, creating the contributor', async () => {
+	it('creates an unlinked assignee from a name when explicitly asked', async () => {
 		const result = await tools.addIssueAssignee({
 			repoRoot: '/repo',
 			issueId: 'issue-1',
 			assigneeName: 'Bob',
+			createUnlinked: true,
 		});
 
 		expect(isFail(result)).toBe(false);
@@ -937,7 +996,517 @@ describe('mcp tools', () => {
 		);
 	});
 
+	it('derives contributors from event-log userIds, not just the registry', async () => {
+		// boot() also calls loadMergedEvents, so a `once` override gets swallowed.
+		// Restore the default at the end: clearAllMocks does not reset
+		// implementations, so a leak here would change every later test.
+		const loadMerged = eventLoadModule.loadMergedEvents as ReturnType<
+			typeof vi.fn
+		>;
+		loadMerged.mockReturnValue(
+			succeeded('loaded', [
+				{
+					id: 'e1',
+					userId: 'user-1',
+					userName: 'Alice',
+					action: 'edit.title',
+					payload: {id: 'issue-1', name: 'x'},
+				},
+				// Same person, later event, new display name: the latest wins.
+				{
+					id: 'e2',
+					userId: 'user-1',
+					userName: 'Alice Cooper',
+					action: 'edit.title',
+					payload: {id: 'issue-1', name: 'y'},
+				},
+				{
+					id: 'e3',
+					userId: 'user-2',
+					userName: 'Bob',
+					action: 'edit.title',
+					payload: {id: 'issue-1', name: 'z'},
+				},
+			]),
+		);
+
+		const result = await tools.getBoardContributors({repoRoot: '/repo'});
+
+		expect(isFail(result)).toBe(false);
+		if (!isFail(result)) {
+			const byId = Object.fromEntries(result.value.map(c => [c.id, c.name]));
+			expect(byId['user-1']).toBe('Alice Cooper');
+			expect(byId['user-2']).toBe('Bob');
+			expect(byId['contributor-1']).toBe('Alice');
+		}
+
+		loadMerged.mockReturnValue(succeeded('loaded', []));
+	});
+
+	it('assigns self using the config userId, registering that exact id', async () => {
+		const loadMerged = eventLoadModule.loadMergedEvents as ReturnType<
+			typeof vi.fn
+		>;
+		loadMerged.mockReturnValue(
+			succeeded('loaded', [
+				{
+					id: 'e1',
+					userId: 'user-1',
+					userName: 'Alice',
+					action: 'edit.title',
+					payload: {id: 'issue-1', name: 'x'},
+				},
+			]),
+		);
+
+		const result = await tools.addIssueAssignee({
+			repoRoot: '/repo',
+			issueId: 'issue-1',
+			self: true,
+		});
+
+		expect(isFail(result)).toBe(false);
+		if (!isFail(result)) {
+			expect(result.value.assignee.id).toBe('user-1');
+		}
+
+		// Guards against minting a fresh ulid for somebody who already has an id.
+		const calls = (
+			persistModule.materializeAndPersistAll as ReturnType<typeof vi.fn>
+		).mock.calls[0]?.[0];
+		expect(calls).toEqual([
+			expect.objectContaining({
+				action: 'create.contributor',
+				payload: {id: 'user-1', name: 'Alice'},
+			}),
+			expect.objectContaining({
+				action: 'add.issue.assignee',
+				payload: {id: 'issue-1', assignee: 'user-1'},
+			}),
+		]);
+
+		loadMerged.mockReturnValue(succeeded('loaded', []));
+	});
+
+	it('marks registry-only contributors as external, authors as not', async () => {
+		const loadMerged = eventLoadModule.loadMergedEvents as ReturnType<
+			typeof vi.fn
+		>;
+		loadMerged.mockReturnValue(
+			succeeded('loaded', [
+				{
+					id: 'e1',
+					userId: 'user-1',
+					userName: 'Alice',
+					action: 'edit.title',
+					payload: {id: 'issue-1', name: 'x'},
+				},
+			]),
+		);
+
+		const result = await tools.getBoardContributors({repoRoot: '/repo'});
+
+		expect(isFail(result)).toBe(false);
+		if (!isFail(result)) {
+			const byId = Object.fromEntries(
+				result.value.map(c => [c.id, c.isExternal]),
+			);
+			expect(byId['user-1']).toBe(false);
+			expect(byId['contributor-1']).toBe(true);
+		}
+
+		loadMerged.mockReturnValue(succeeded('loaded', []));
+	});
+
+	it('removes an external contributor, keeping the id', async () => {
+		const result = await tools.tombstoneContributor({
+			repoRoot: '/repo',
+			contributorId: 'contributor-1',
+		});
+
+		expect(isFail(result)).toBe(false);
+		if (!isFail(result)) {
+			expect(result.value.id).toBe('contributor-1');
+			expect(result.value.name).toBe(REMOVED_CONTRIBUTOR_NAME);
+		}
+
+		// A forward event: nothing in the log is rewritten.
+		const calls = (
+			persistModule.materializeAndPersistAll as ReturnType<typeof vi.fn>
+		).mock.calls[0]?.[0];
+		expect(calls).toEqual([
+			expect.objectContaining({
+				action: 'tombstone.contributor',
+				payload: {id: 'contributor-1'},
+			}),
+		]);
+	});
+
+	describe('restoreContributor', () => {
+		const asTombstoned = () => {
+			contributorRegistry['contributor-1'] = {
+				id: 'contributor-1',
+				name: REMOVED_CONTRIBUTOR_NAME,
+				tombstoned: true,
+			};
+		};
+
+		const logWithCreate = (name: string) =>
+			(
+				eventLoadModule.loadMergedEvents as ReturnType<typeof vi.fn>
+			).mockReturnValue(
+				succeeded('loaded', [
+					{
+						id: 'create-1',
+						userId: 'someone-else',
+						userName: 'Someone Else',
+						action: 'create.contributor',
+						payload: {id: 'contributor-1', name},
+					},
+				]),
+			);
+
+		it('puts back the name the contributor was created under', async () => {
+			asTombstoned();
+			logWithCreate('Temp Tester');
+
+			const result = await tools.restoreContributor({
+				repoRoot: '/repo',
+				contributorId: 'contributor-1',
+			});
+
+			expect(isFail(result)).toBe(false);
+			if (!isFail(result)) {
+				expect(result.value).toEqual({
+					id: 'contributor-1',
+					name: 'Temp Tester',
+				});
+			}
+
+			// The name rides in the payload, so replay does not depend on what
+			// else is in the log.
+			const calls = (
+				persistModule.materializeAndPersistAll as ReturnType<typeof vi.fn>
+			).mock.calls[0]?.[0];
+			expect(calls).toEqual([
+				expect.objectContaining({
+					action: 'restore.contributor',
+					payload: {id: 'contributor-1', name: 'Temp Tester'},
+				}),
+			]);
+		});
+
+		it('refuses a contributor who is not tombstoned', async () => {
+			logWithCreate('Alice');
+
+			const result = await tools.restoreContributor({
+				repoRoot: '/repo',
+				contributorId: 'contributor-1',
+			});
+
+			expect(isFail(result)).toBe(true);
+			if (isFail(result)) {
+				expect(result.message).toBe('Contributor is not tombstoned');
+			}
+
+			expect(persistModule.materializeAndPersistAll).not.toHaveBeenCalled();
+		});
+
+		it('refuses when the log has no create.contributor to read', async () => {
+			asTombstoned();
+			(
+				eventLoadModule.loadMergedEvents as ReturnType<typeof vi.fn>
+			).mockReturnValue(succeeded('loaded', []));
+
+			const result = await tools.restoreContributor({
+				repoRoot: '/repo',
+				contributorId: 'contributor-1',
+			});
+
+			expect(isFail(result)).toBe(true);
+			if (isFail(result)) {
+				expect(result.message).toContain('no original name');
+			}
+
+			expect(persistModule.materializeAndPersistAll).not.toHaveBeenCalled();
+		});
+
+		it('refuses an unknown contributor', async () => {
+			const result = await tools.restoreContributor({
+				repoRoot: '/repo',
+				contributorId: 'nobody',
+			});
+
+			expect(isFail(result)).toBe(true);
+			if (isFail(result)) {
+				expect(result.message).toBe('Contributor not found');
+			}
+		});
+	});
+
+	// The state a stale local log can produce: cleared, yet an author.
+	// Guards against a later sync quietly restoring somebody: the log still
+	// carries the name they authored under, so the registry has to win.
+	it('keeps a tombstoned name cleared even when the log carries the real one', async () => {
+		contributorRegistry['contributor-1'] = {
+			id: 'contributor-1',
+			name: REMOVED_CONTRIBUTOR_NAME,
+			tombstoned: true,
+		};
+
+		const loadMerged = eventLoadModule.loadMergedEvents as ReturnType<
+			typeof vi.fn
+		>;
+		loadMerged.mockReturnValue(
+			succeeded('loaded', [
+				{
+					id: 'e1',
+					userId: 'contributor-1',
+					userName: 'Alice',
+					action: 'edit.title',
+					payload: {id: 'issue-1', name: 'x'},
+				},
+			]),
+		);
+
+		const result = await tools.getBoardContributors({repoRoot: '/repo'});
+
+		expect(isFail(result)).toBe(false);
+		if (!isFail(result)) {
+			const tombstoned = result.value.find(c => c.id === 'contributor-1');
+			expect(tombstoned?.name).toBe(REMOVED_CONTRIBUTOR_NAME);
+			expect(tombstoned?.isRemoved).toBe(true);
+		}
+
+		loadMerged.mockReturnValue(succeeded('loaded', []));
+	});
+
+	// `isExternal` is board-scoped, the removal guard is workspace-wide; a
+	// client that conflates them offers a teammate the server then refuses.
+	it('separates board-scoped external from workspace-wide authorship', async () => {
+		// Registered, since the candidate list is board authors plus the
+		// registry — that is what makes an off-board author reachable here.
+		contributorRegistry['user-elsewhere'] = {
+			id: 'user-elsewhere',
+			name: 'Elsewhere',
+		};
+
+		const loadMerged = eventLoadModule.loadMergedEvents as ReturnType<
+			typeof vi.fn
+		>;
+		loadMerged.mockReturnValue(
+			succeeded('loaded', [
+				{
+					id: 'e1',
+					userId: 'user-here',
+					userName: 'Here',
+					action: 'edit.title',
+					payload: {id: 'issue-1', name: 'x', boardId: 'board-1'},
+				},
+				{
+					id: 'e2',
+					userId: 'user-elsewhere',
+					userName: 'Elsewhere',
+					action: 'edit.title',
+					payload: {id: 'issue-2', name: 'y', boardId: 'board-2'},
+				},
+			]),
+		);
+
+		const result = await tools.getBoardContributors({
+			repoRoot: '/repo',
+			boardId: 'board-1',
+		});
+
+		expect(isFail(result)).toBe(false);
+		if (isFail(result)) return;
+
+		const byId = Object.fromEntries(result.value.map(c => [c.id, c]));
+
+		expect(byId['user-here']?.isExternal).toBe(false);
+		expect(byId['user-here']?.hasAuthoredAnywhere).toBe(true);
+
+		// External to this board, but an author elsewhere, so not clearable.
+		expect(byId['user-elsewhere']?.isExternal).toBe(true);
+		expect(byId['user-elsewhere']?.hasAuthoredAnywhere).toBe(true);
+
+		// Registry-only, so the one genuinely clearable case.
+		expect(byId['contributor-1']?.isExternal).toBe(true);
+		expect(byId['contributor-1']?.hasAuthoredAnywhere).toBe(false);
+
+		loadMerged.mockReturnValue(succeeded('loaded', []));
+	});
+
+	it('keeps a tombstoned assignee cleared on issues the log names them in', async () => {
+		contributorRegistry['contributor-1'] = {
+			id: 'contributor-1',
+			name: REMOVED_CONTRIBUTOR_NAME,
+			tombstoned: true,
+		};
+
+		// The competing name the log-name override would otherwise promote.
+		stateEventLog = [
+			...DEFAULT_STATE_EVENT_LOG,
+			{
+				id: 'e-tombstoned',
+				userId: 'contributor-1',
+				userName: 'Alice',
+				action: 'edit.title',
+				payload: {id: 'issue-1', name: 'x'},
+			},
+		];
+
+		const result = await tools.listIssues({repoRoot: '/repo'});
+
+		expect(isFail(result)).toBe(false);
+		if (!isFail(result)) {
+			const assignees = result.value.flatMap(issue => issue.assignees);
+			const tombstoned = assignees.find(a => a.id === 'contributor-1');
+			expect(tombstoned).toBeDefined();
+			expect(tombstoned?.name).toBe(REMOVED_CONTRIBUTOR_NAME);
+		}
+	});
+
+	it('refuses to remove a contributor who has authored events', async () => {
+		const loadMerged = eventLoadModule.loadMergedEvents as ReturnType<
+			typeof vi.fn
+		>;
+		loadMerged.mockReturnValue(
+			succeeded('loaded', [
+				{
+					id: 'e1',
+					userId: 'contributor-1',
+					userName: 'Alice',
+					action: 'edit.title',
+					payload: {id: 'issue-1', name: 'x'},
+				},
+			]),
+		);
+
+		const result = await tools.tombstoneContributor({
+			repoRoot: '/repo',
+			contributorId: 'contributor-1',
+		});
+
+		expect(isFail(result)).toBe(true);
+		if (isFail(result)) {
+			expect(result.message).toContain('authored events');
+		}
+
+		expect(persistModule.materializeAndPersistAll).not.toHaveBeenCalled();
+
+		loadMerged.mockReturnValue(succeeded('loaded', []));
+	});
+
+	it('marks self in the contributor list', async () => {
+		const loadMerged = eventLoadModule.loadMergedEvents as ReturnType<
+			typeof vi.fn
+		>;
+		loadMerged.mockReturnValue(
+			succeeded('loaded', [
+				{
+					id: 'e1',
+					userId: 'user-1',
+					userName: 'Alice',
+					action: 'edit.title',
+					payload: {id: 'issue-1', name: 'x'},
+				},
+				{
+					id: 'e2',
+					userId: 'user-2',
+					userName: 'Bob',
+					action: 'edit.title',
+					payload: {id: 'issue-1', name: 'y'},
+				},
+			]),
+		);
+
+		const result = await tools.getBoardContributors({repoRoot: '/repo'});
+
+		expect(isFail(result)).toBe(false);
+		if (!isFail(result)) {
+			const self = result.value.filter(c => c.isSelf);
+			expect(self).toHaveLength(1);
+			expect(self[0]?.id).toBe('user-1');
+		}
+
+		loadMerged.mockReturnValue(succeeded('loaded', []));
+	});
+
+	it('assigns by id without creating a contributor', async () => {
+		const result = await tools.addIssueAssignee({
+			repoRoot: '/repo',
+			issueId: 'issue-1',
+			assigneeId: 'contributor-1',
+		});
+
+		expect(isFail(result)).toBe(false);
+		if (!isFail(result)) {
+			expect(result.value.assignee).toEqual({
+				id: 'contributor-1',
+				name: 'Alice',
+			});
+		}
+
+		const calls = (
+			persistModule.materializeAndPersistAll as ReturnType<typeof vi.fn>
+		).mock.calls[0]?.[0];
+		expect(calls).toEqual([
+			expect.objectContaining({
+				action: 'add.issue.assignee',
+				payload: {id: 'issue-1', assignee: 'contributor-1'},
+			}),
+		]);
+	});
+
+	it('fails on an unknown assignee id instead of creating one', async () => {
+		const result = await tools.addIssueAssignee({
+			repoRoot: '/repo',
+			issueId: 'issue-1',
+			assigneeId: 'contributor-missing',
+		});
+
+		expect(isFail(result)).toBe(true);
+		if (isFail(result)) {
+			expect(result.message).toBe('Unknown assignee id');
+		}
+
+		expect(persistModule.materializeAndPersistAll).not.toHaveBeenCalled();
+	});
+
+	it('fails when neither an assignee id nor a name is given', async () => {
+		const result = await tools.addIssueAssignee({
+			repoRoot: '/repo',
+			issueId: 'issue-1',
+		});
+
+		expect(isFail(result)).toBe(true);
+		if (isFail(result)) {
+			expect(result.message).toBe('Provide assigneeId, self or assigneeName');
+		}
+	});
+
+	// Guards against a misspelt name silently creating a near-duplicate person.
+	it('refuses an unmatched name unless createUnlinked is set', async () => {
+		const result = await tools.addIssueAssignee({
+			repoRoot: '/repo',
+			issueId: 'issue-1',
+			assigneeName: 'Nobody',
+		});
+
+		expect(isFail(result)).toBe(true);
+		if (isFail(result)) {
+			expect(result.message).toContain('createUnlinked');
+		}
+
+		expect(persistModule.materializeAndPersistAll).not.toHaveBeenCalled();
+	});
+
 	it('adds an existing contributor as assignee without creating a duplicate', async () => {
+		// The default log author is a separate id sharing the registry's display
+		// name, which the union correctly reads as two people called Alice.
+		stateEventLog = [{...DEFAULT_STATE_EVENT_LOG[0], userId: 'contributor-1'}];
+
 		const result = await tools.addIssueAssignee({
 			repoRoot: '/repo',
 			issueId: 'issue-1',
@@ -961,6 +1530,66 @@ describe('mcp tools', () => {
 				payload: {id: 'issue-1', assignee: 'contributor-1'},
 			}),
 		]);
+	});
+
+	// Guards against minting a second id for an author absent from the registry.
+	it('matches a name found only in the event log and reuses that id', async () => {
+		stateEventLog = [
+			{
+				id: 'event-1',
+				userId: 'log-only-author',
+				userName: 'Log Only',
+				action: 'edit.title',
+				payload: {id: 'issue-1', name: 'x'},
+			},
+		];
+
+		const result = await tools.addIssueAssignee({
+			repoRoot: '/repo',
+			issueId: 'issue-1',
+			assigneeName: 'Log Only',
+		});
+
+		expect(isFail(result)).toBe(false);
+		if (!isFail(result)) {
+			expect(result.value.assignee).toEqual({
+				id: 'log-only-author',
+				name: 'Log Only',
+			});
+		}
+
+		const calls = (
+			persistModule.materializeAndPersistAll as ReturnType<typeof vi.fn>
+		).mock.calls[0]?.[0];
+
+		expect(calls).toEqual([
+			expect.objectContaining({
+				action: 'create.contributor',
+				payload: {id: 'log-only-author', name: 'Log Only'},
+			}),
+			expect.objectContaining({
+				action: 'add.issue.assignee',
+				payload: {id: 'issue-1', assignee: 'log-only-author'},
+			}),
+		]);
+	});
+
+	it('refuses a name that matches two different contributors', async () => {
+		// Registry "Alice" (contributor-1) and log author "Alice" (user-1) are
+		// two ids with one display name.
+		const result = await tools.addIssueAssignee({
+			repoRoot: '/repo',
+			issueId: 'issue-1',
+			assigneeName: 'Alice',
+		});
+
+		expect(isFail(result)).toBe(true);
+		if (isFail(result)) {
+			expect(result.message).toContain('matches 2 contributors');
+			expect(result.message).toContain('assigneeId');
+		}
+
+		expect(persistModule.materializeAndPersistAll).not.toHaveBeenCalled();
 	});
 
 	it('removes an assignee from an issue', async () => {

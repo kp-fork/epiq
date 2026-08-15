@@ -342,4 +342,153 @@ describe('loadMergedEvents with foreign events on disk', () => {
 
 		fs.rmSync(root, {recursive: true, force: true});
 	});
+
+	// File names lowercase the id for filesystem safety, but a ULID must come
+	// back canonical or the same person appears twice.
+	it('restores canonical ULID casing for the actor id parsed from the file name', () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epiq-case-'));
+		const eventsDir = path.join(root, '.epiq', 'events');
+		fs.mkdirSync(eventsDir, {recursive: true});
+
+		fs.writeFileSync(
+			path.join(eventsDir, '01ksayra4ghekjp888wfbwbrdd.alice.jsonl'),
+			JSON.stringify({
+				v: 1,
+				id: ['01H0000000000000000000000A', null],
+				'init.workspace': {id: 'ws1', name: 'Workspace', rank: 'a0'},
+			}) + '\n',
+		);
+
+		const result = loadMergedEvents(root);
+
+		expect(isFail(result)).toBe(false);
+		if (isFail(result)) return;
+		expect(result.value[0]?.userId).toBe('01KSAYRA4GHEKJP888WFBWBRDD');
+
+		fs.rmSync(root, {recursive: true, force: true});
+	});
+
+	it('leaves a non-ULID actor id untouched', () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epiq-case2-'));
+		const eventsDir = path.join(root, '.epiq', 'events');
+		fs.mkdirSync(eventsDir, {recursive: true});
+
+		fs.writeFileSync(
+			path.join(eventsDir, 'legacy-user.alice.jsonl'),
+			JSON.stringify({
+				v: 1,
+				id: ['01H0000000000000000000000A', null],
+				'init.workspace': {id: 'ws1', name: 'Workspace', rank: 'a0'},
+			}) + '\n',
+		);
+
+		const result = loadMergedEvents(root);
+
+		expect(isFail(result)).toBe(false);
+		if (isFail(result)) return;
+		expect(result.value[0]?.userId).toBe('legacy-user');
+
+		fs.rmSync(root, {recursive: true, force: true});
+	});
+
+	// Dots survive sanitizing, so a name segment may contain them. Splitting on
+	// every dot truncated the name and collapsed distinct people onto one value.
+	it('keeps a dotted user name intact when parsed from the file name', () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epiq-dot-'));
+		const eventsDir = path.join(root, '.epiq', 'events');
+		fs.mkdirSync(eventsDir, {recursive: true});
+
+		fs.writeFileSync(
+			path.join(eventsDir, '01ksayra4ghekjp888wfbwbrdd.j.-lampa.jsonl'),
+			JSON.stringify({
+				v: 1,
+				id: ['01H0000000000000000000000A', null],
+				'init.workspace': {id: 'ws1', name: 'Workspace', rank: 'a0'},
+			}) + '\n',
+		);
+
+		const result = loadMergedEvents(root);
+
+		expect(isFail(result)).toBe(false);
+		if (isFail(result)) return;
+		expect(result.value[0]?.userId).toBe('01KSAYRA4GHEKJP888WFBWBRDD');
+		expect(result.value[0]?.userName).toBe('j.-lampa');
+
+		fs.rmSync(root, {recursive: true, force: true});
+	});
+
+	// Only the first dot is a boundary: the id segment never contains one.
+	it('keeps every dot of a multi-dot user name', () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epiq-dots-'));
+		const eventsDir = path.join(root, '.epiq', 'events');
+		fs.mkdirSync(eventsDir, {recursive: true});
+
+		fs.writeFileSync(
+			path.join(eventsDir, '01ksayra4ghekjp888wfbwbrdd.a.b.c-dev.jsonl'),
+			JSON.stringify({
+				v: 1,
+				id: ['01H0000000000000000000000A', null],
+				'init.workspace': {id: 'ws1', name: 'Workspace', rank: 'a0'},
+			}) + '\n',
+		);
+
+		const result = loadMergedEvents(root);
+
+		expect(isFail(result)).toBe(false);
+		if (isFail(result)) return;
+		expect(result.value[0]?.userId).toBe('01KSAYRA4GHEKJP888WFBWBRDD');
+		// Casing is an id concern only; the name passes through as the file
+		// carries it, so it still matches a re-encoded registry name.
+		expect(result.value[0]?.userName).toBe('a.b.c-dev');
+
+		fs.rmSync(root, {recursive: true, force: true});
+	});
+
+	it('falls back to an unknown user name when the file name has no dot', () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epiq-nodot-'));
+		const eventsDir = path.join(root, '.epiq', 'events');
+		fs.mkdirSync(eventsDir, {recursive: true});
+
+		fs.writeFileSync(
+			path.join(eventsDir, '01ksayra4ghekjp888wfbwbrdd.jsonl'),
+			JSON.stringify({
+				v: 1,
+				id: ['01H0000000000000000000000A', null],
+				'init.workspace': {id: 'ws1', name: 'Workspace', rank: 'a0'},
+			}) + '\n',
+		);
+
+		const result = loadMergedEvents(root);
+
+		expect(isFail(result)).toBe(false);
+		if (isFail(result)) return;
+		expect(result.value[0]?.userId).toBe('01KSAYRA4GHEKJP888WFBWBRDD');
+		expect(result.value[0]?.userName).toBe('unknown');
+
+		fs.rmSync(root, {recursive: true, force: true});
+	});
+
+	// Must fail as a Result, never throw.
+	it('fails on a file name with an empty user name segment', () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epiq-empty-'));
+		const eventsDir = path.join(root, '.epiq', 'events');
+		fs.mkdirSync(eventsDir, {recursive: true});
+
+		fs.writeFileSync(
+			path.join(eventsDir, '01ksayra4ghekjp888wfbwbrdd..jsonl'),
+			JSON.stringify({
+				v: 1,
+				id: ['01H0000000000000000000000A', null],
+				'init.workspace': {id: 'ws1', name: 'Workspace', rank: 'a0'},
+			}) + '\n',
+		);
+
+		const result = loadMergedEvents(root);
+
+		expect(isFail(result)).toBe(true);
+		if (!isFail(result)) return;
+		expect(result.message).toContain('Invalid event file name');
+
+		fs.rmSync(root, {recursive: true, force: true});
+	});
 });

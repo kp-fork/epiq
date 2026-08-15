@@ -78,6 +78,27 @@ export type AppEventMap = {
 		result: Contributor;
 	};
 
+	/**
+	 * Clears a contributor's display name, keeping the id and its references.
+	 * A forward event: the log is never rewritten, so earlier events still carry
+	 * the name and replay unchanged.
+	 */
+	'tombstone.contributor': {
+		payload: PayloadBase;
+		result: Contributor;
+	};
+
+	/**
+	 * Undoes a `tombstone.contributor`, which is recoverable because the guard on
+	 * removal only sees the log this machine has pulled. Carries the name
+	 * explicitly: reading it back off earlier events would make replay depend on
+	 * which of them happen to be present.
+	 */
+	'restore.contributor': {
+		payload: PayloadBase & {name: string};
+		result: Contributor;
+	};
+
 	'add.issue.assignee': {
 		payload: PayloadBase & {
 			assignee: string;
@@ -250,6 +271,8 @@ export const EVENT_ACTIONS = [
 	'delete.node',
 	'create.tag',
 	'create.contributor',
+	'tombstone.contributor',
+	'restore.contributor',
 	'add.issue.assignee',
 	'remove.issue.assignee',
 	'add.issue.tag',

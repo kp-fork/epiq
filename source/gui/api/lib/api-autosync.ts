@@ -2,6 +2,10 @@ import {readEpiqConfig} from '../../../lib/config/user-config.js';
 import {isFail} from '../../../lib/model/result-types.js';
 import {logger} from '../../../logger.js';
 import {getGuiState, sync} from '../../../mcp/epiq-api.js';
+import {
+	getTimeTravelStatus,
+	runExclusive,
+} from '../../../mcp/epiq-time-travel.js';
 import {broadcastGuiMessage} from '../../client/lib/gui-broadcast.js';
 
 export const startGuiAutoSync = (input: {repoRoot: string}) => {
@@ -30,11 +34,17 @@ export const startGuiAutoSync = (input: {repoRoot: string}) => {
 		syncing = true;
 
 		try {
-			await sync({repoRoot: input.repoRoot});
+			// The live check must stay inside the lock, or a scrub lands in the gap
+			// before the getGuiState broadcast silently overwrites it.
+			await runExclusive(async () => {
+				if (getTimeTravelStatus().mode !== 'live') return;
 
-			broadcastGuiMessage({
-				type: 'state',
-				payload: await getGuiState({repoRoot: input.repoRoot}),
+				await sync({repoRoot: input.repoRoot});
+
+				broadcastGuiMessage({
+					type: 'state',
+					payload: await getGuiState({repoRoot: input.repoRoot}),
+				});
 			});
 		} finally {
 			syncing = false;

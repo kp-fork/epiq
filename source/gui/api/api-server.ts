@@ -16,6 +16,7 @@ import {
 	getAttachmentBlob,
 	getGuiState,
 } from '../../mcp/epiq-api.js';
+import {getTimeTravelStatus, runExclusive} from '../../mcp/epiq-time-travel.js';
 import {startGuiAutoSync} from './lib/api-autosync.js';
 import {setupWebsocket} from './lib/websocket.js';
 
@@ -41,6 +42,27 @@ const sendJson = (res: http.ServerResponse, status: number, body: unknown) => {
 	res.writeHead(status, {'content-type': 'application/json'});
 	res.end(JSON.stringify(body));
 };
+
+const sendReadOnlyWhileTimeTravelingError = (res: http.ServerResponse) =>
+	sendJson(res, 409, {
+		isError: true,
+		message: 'Read-only while viewing history',
+	});
+
+/**
+ * The live check must stay *inside* the lock; checking then awaiting is
+ * check-then-act. `runExclusive` is not re-entrant, so `mutate` must not take
+ * it again. Read request bodies *before* calling this, or a client-paced
+ * upload holds a server-wide lock and stalls scrubbing for everyone.
+ */
+const runMutation = <T>(res: http.ServerResponse, mutate: () => Promise<T>) =>
+	runExclusive(async () => {
+		if (getTimeTravelStatus().mode !== 'live') {
+			return sendReadOnlyWhileTimeTravelingError(res);
+		}
+
+		return mutate();
+	});
 
 const readJsonBody = async <T>(
 	req: http.IncomingMessage,
@@ -73,10 +95,7 @@ const readJsonBody = async <T>(
 		req.on('error', reject);
 	});
 
-/**
- * Base64 inflates the 500 KB blob cap by ~4/3; leave headroom on top for
- * the JSON envelope.
- */
+/** Base64 inflates the 500 KB blob cap by ~4/3, plus headroom for the envelope. */
 const ATTACHMENT_BODY_MAX_BYTES = 2 * 1024 * 1024;
 
 const MEDIA_CONTENT_TYPES: Record<string, string> = {
@@ -197,21 +216,29 @@ export const startGuiServer = async (input: {
 					});
 				}
 
-				const result = await addIssueComment({
-					repoRoot: input.repoRoot,
-					issueId: body.issueId,
-					body: body.body,
+				const issueId = body.issueId;
+				const commentBody = body.body;
+
+				return await runMutation(res, async () => {
+					const result = await addIssueComment({
+						repoRoot: input.repoRoot,
+						issueId,
+						body: commentBody,
+					});
+
+					if (isFail(result)) {
+						return sendJson(res, 400, {
+							isError: true,
+							message: result.message,
+						});
+					}
+
+					return sendJson(
+						res,
+						200,
+						await getGuiState({repoRoot: input.repoRoot}),
+					);
 				});
-
-				if ('isError' in result && result.isError) {
-					return sendJson(res, 400, result);
-				}
-
-				return sendJson(
-					res,
-					200,
-					await getGuiState({repoRoot: input.repoRoot}),
-				);
 			} catch (error) {
 				return sendJson(res, 400, {
 					isError: true,
@@ -236,25 +263,31 @@ export const startGuiServer = async (input: {
 					});
 				}
 
-				const result = await addIssueAttachment({
-					repoRoot: input.repoRoot,
-					issueId: body.issueId,
-					name: body.name ?? '',
-					dataBase64: body.dataBase64,
-				});
+				const issueId = body.issueId;
+				const dataBase64 = body.dataBase64;
+				const name = body.name ?? '';
 
-				if (isFail(result)) {
-					return sendJson(res, 400, {
-						isError: true,
-						message: result.message,
+				return await runMutation(res, async () => {
+					const result = await addIssueAttachment({
+						repoRoot: input.repoRoot,
+						issueId,
+						name,
+						dataBase64,
 					});
-				}
 
-				return sendJson(
-					res,
-					200,
-					await getGuiState({repoRoot: input.repoRoot}),
-				);
+					if (isFail(result)) {
+						return sendJson(res, 400, {
+							isError: true,
+							message: result.message,
+						});
+					}
+
+					return sendJson(
+						res,
+						200,
+						await getGuiState({repoRoot: input.repoRoot}),
+					);
+				});
 			} catch (error) {
 				return sendJson(res, 400, {
 					isError: true,
@@ -279,19 +312,25 @@ export const startGuiServer = async (input: {
 				});
 			}
 
-			const result = await deleteIssueAttachment({
-				repoRoot: input.repoRoot,
-				attachmentId,
-			});
-
-			if (isFail(result)) {
-				return sendJson(res, 400, {
-					isError: true,
-					message: result.message,
+			return runMutation(res, async () => {
+				const result = await deleteIssueAttachment({
+					repoRoot: input.repoRoot,
+					attachmentId,
 				});
-			}
 
-			return sendJson(res, 200, await getGuiState({repoRoot: input.repoRoot}));
+				if (isFail(result)) {
+					return sendJson(res, 400, {
+						isError: true,
+						message: result.message,
+					});
+				}
+
+				return sendJson(
+					res,
+					200,
+					await getGuiState({repoRoot: input.repoRoot}),
+				);
+			});
 		}
 
 		if (req.method === 'GET' && url.pathname.startsWith('/media/')) {
@@ -341,16 +380,25 @@ export const startGuiServer = async (input: {
 				});
 			}
 
-			const result = await deleteIssueComment({
-				repoRoot: input.repoRoot,
-				commentId,
+			return runMutation(res, async () => {
+				const result = await deleteIssueComment({
+					repoRoot: input.repoRoot,
+					commentId,
+				});
+
+				if (isFail(result)) {
+					return sendJson(res, 400, {
+						isError: true,
+						message: result.message,
+					});
+				}
+
+				return sendJson(
+					res,
+					200,
+					await getGuiState({repoRoot: input.repoRoot}),
+				);
 			});
-
-			if ('isError' in result && result.isError) {
-				return sendJson(res, 400, result);
-			}
-
-			return sendJson(res, 200, await getGuiState({repoRoot: input.repoRoot}));
 		}
 
 		if (url.pathname.startsWith('/board/')) {

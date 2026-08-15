@@ -4,8 +4,7 @@ import {execSync} from 'child_process';
 
 export const commonSteps = {
 	configureInitialSettings: async (tui: ReturnType<typeof setupTui>) => {
-		// Cold app start: parallel e2e files contend for CPU, so allow extra time
-		// for the first frame rather than the default 3s.
+		// Headroom for a cold start on slow CI hardware.
 		await tui.waitFor('choose your username', 8_000);
 		tui.input(':config username test\r');
 
@@ -31,16 +30,16 @@ export const commonSteps = {
 			stdio: 'ignore',
 		});
 
-		// Cold app start: allow extra time for the first frame (see above).
-		output = await tui.waitFor('Initialize project', 8_000);
+		// Wait on the asserted text, not the title: they arrive in separate chunks.
+		output = await tui.waitFor(
+			'This folder is not an epiq project yet.',
+			8_000,
+		);
 
 		expect(output).toContain('This folder is not an epiq project yet.');
 
-		// Type the command and wait for it to render as a confirmable command
-		// before sending ENTER. Sending ":init\r" as one chunk lets the ENTER be
-		// handled before ":init" is committed to the command store, so the confirm
-		// is dropped ("No command to confirm"). This is timing-dependent and shows
-		// up under CI load while passing locally.
+		// ENTER must be a separate chunk, or it is handled before the command is
+		// committed and the confirm is dropped.
 		tui.input(':init');
 		await tui.waitFor('<ENTER> to confirm', 8_000);
 		tui.input('\r');

@@ -26,6 +26,7 @@ import {
 } from '../state/state.js';
 import {patchUiState} from '../state/ux-state.js';
 import {getPersistRoot} from '../storage/paths.js';
+import {preferBestName} from '../utils/contributor.utils.js';
 import {openUrl} from '../utils/open-in-browser.js';
 import {CmdKeywords} from './cmd-keywords.js';
 import {CmdIntent} from './command-intent.js';
@@ -60,10 +61,46 @@ const isAddIssueCommentEvent = (
 const findTagByName = (name: string) =>
 	Object.values(getState().tags).find(tag => tag.name === name);
 
-const findContributorByName = (name: string) =>
-	Object.values(getState().contributors).find(
-		contributor => contributor.name === name,
-	);
+// The registry only holds people explicitly created or assigned, so it is often
+// empty even of you; log authors are candidates too.
+const getAssignableContributors = (): {
+	id: string;
+	name: string;
+	isExternal: boolean;
+}[] => {
+	// May run before boot has populated the log.
+	const {eventLog = [], contributors} = getState();
+	const byId = new Map<string, string>();
+	const authorIds = new Set<string>();
+
+	for (const event of eventLog) {
+		if (!event.userId) continue;
+
+		byId.set(event.userId, event.userName ?? '');
+		authorIds.add(event.userId);
+	}
+
+	for (const contributor of Object.values(contributors)) {
+		// Removal must beat the log's name, or a removed name reappears here.
+		if (contributor.tombstoned) {
+			byId.set(contributor.id, contributor.name);
+			continue;
+		}
+
+		// Offer the name the user can actually type — the log's copy is sanitized.
+		byId.set(
+			contributor.id,
+			preferBestName(contributor.name, byId.get(contributor.id)) ??
+				contributor.name,
+		);
+	}
+
+	return [...byId.entries()].map(([id, name]) => ({
+		id,
+		name,
+		isExternal: !authorIds.has(id),
+	}));
+};
 
 const getPersistRootValue = async () => {
 	const persistRootResult = await getPersistRoot();
@@ -510,7 +547,13 @@ export const commands: CommandLineActionEntry[] = [
 			if (isFail(userRes)) return failed('Unable to resolve user ID');
 
 			const {modifier, inputString} = getCmdState().commandMeta;
-			const name = (modifier || inputString).trim();
+			const raw = (modifier || inputString).trim();
+			if (!raw) return failed('Provide an assignee');
+
+			// "!" is the explicit gesture for inventing somebody new; without it an
+			// unmatched name is refused rather than created from a typo.
+			const wantsExternal = raw.startsWith('!');
+			const name = (wantsExternal ? raw.slice(1) : raw).trim();
 			if (!name) return failed('Provide an assignee');
 
 			const {selectedIndex, contextNode} = getState();
@@ -528,8 +571,40 @@ export const commands: CommandLineActionEntry[] = [
 			const persistRootResult = await getPersistRootValue();
 			if (isFail(persistRootResult)) return persistRootResult;
 
-			const existingContributor = findContributorByName(name);
-			const contributorId = existingContributor?.id ?? ulid();
+			const candidates = getAssignableContributors();
+			const isSelf = !wantsExternal && name.toLowerCase() === 'me';
+
+			let contributorId: string;
+			let contributorName: string;
+
+			if (isSelf) {
+				// The id your events are authored under, so both refer to one person.
+				contributorId = userRes.value.userId;
+				contributorName =
+					candidates.find(c => c.id === contributorId)?.name ??
+					userRes.value.userName;
+			} else {
+				const matches = candidates.filter(c => c.name === name);
+
+				if (matches.length > 1) {
+					return failed(
+						`"${name}" matches ${matches.length} contributors (${matches
+							.map(c => c.id)
+							.join(', ')}). Assign from the GUI to choose by id.`,
+					);
+				}
+
+				const match = matches[0];
+
+				if (!match && !wantsExternal) {
+					return failed(
+						`No contributor named "${name}". Use "!${name}" to add them as an external assignee.`,
+					);
+				}
+
+				contributorId = match?.id ?? ulid();
+				contributorName = match?.name ?? name;
+			}
 
 			const assignees = ticket.props.assignees ?? [];
 
@@ -537,9 +612,11 @@ export const commands: CommandLineActionEntry[] = [
 				return failed('Assignee already assigned');
 			}
 
+			const isRegistered = Boolean(getState().contributors[contributorId]);
+
 			return materializeAndPersistAll(
 				[
-					...(existingContributor
+					...(isRegistered
 						? []
 						: [
 								{
@@ -547,7 +624,7 @@ export const commands: CommandLineActionEntry[] = [
 									action: 'create.contributor' as const,
 									payload: {
 										id: contributorId,
-										name,
+										name: contributorName,
 									},
 									...userRes.value,
 								},
@@ -579,11 +656,6 @@ export const commands: CommandLineActionEntry[] = [
 			const name = (modifier || inputString).trim();
 			if (!name) return failed('Provide an assignee to remove');
 
-			const existingContributor = findContributorByName(name);
-			if (!existingContributor) {
-				return failed(`Assignee "${name}" does not exist`);
-			}
-
 			const {selectedNode} = getState();
 			if (!selectedNode) return failed('Invalid unassign target');
 
@@ -597,8 +669,32 @@ export const commands: CommandLineActionEntry[] = [
 
 			const assignees = ticket.props.assignees ?? [];
 
-			if (!assignees.includes(existingContributor.id)) {
-				return failed(`Issue is not assigned to "${name}"`);
+			const isSelf = name.toLowerCase() === 'me';
+
+			// Resolved against this issue's assignees, not the whole registry, so a
+			// shared name is only ambiguous when both people are assigned here.
+			const matches = isSelf
+				? assignees.filter(id => id === userRes.value.userId)
+				: getAssignableContributors()
+						.filter(c => c.name === name && assignees.includes(c.id))
+						.map(c => c.id);
+
+			if (matches.length > 1) {
+				return failed(
+					`"${name}" matches ${matches.length} assignees (${matches.join(
+						', ',
+					)}). Unassign from the GUI to choose by id.`,
+				);
+			}
+
+			const contributorId = matches[0];
+
+			if (!contributorId) {
+				return failed(
+					isSelf
+						? 'Issue is not assigned to you'
+						: `Issue is not assigned to "${name}"`,
+				);
 			}
 
 			const persistRootResult = await getPersistRootValue();
@@ -611,7 +707,7 @@ export const commands: CommandLineActionEntry[] = [
 						action: 'remove.issue.assignee',
 						payload: {
 							id: ticket.id,
-							assignee: existingContributor.id,
+							assignee: contributorId,
 						},
 						...userRes.value,
 					},

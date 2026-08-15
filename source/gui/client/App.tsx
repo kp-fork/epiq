@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {useNavigate, useParams, useSearchParams} from 'react-router-dom';
 import {ASIDE_WIDTH} from './components/Aside';
 import {Button} from './components/Button';
@@ -7,6 +7,9 @@ import {Dropdown} from './components/Dropdown';
 import {Header} from './components/Header';
 import {IssueDetails} from './components/IssueDetails';
 import {SwimlaneColumn} from './components/SwimlaneColumn';
+import {GlobalScrollbarStyles} from './components/GlobalScrollbarStyles';
+import {ErrorToast} from './components/ErrorToast';
+import {TimeScrubber} from './components/TimeScrubber';
 import {moveIssue} from './lib/gui-move-issue';
 import {DropTarget} from './lib/gui-result.model';
 import {nodeRef} from '../../lib/utils/node-ref.js';
@@ -16,7 +19,14 @@ import {
 	getResultValue,
 	updateIssueInGuiState,
 } from './lib/gui-state-helper';
-import {GuiState} from './lib/gui-state.model';
+import {
+	GuiCommitEntry,
+	GuiContributor,
+	GuiEventTimeline,
+	GuiState,
+} from './lib/gui-state.model';
+import {sendSocketJson} from './lib/socket-send';
+import {createHistoryBuffer} from './lib/history-buffer';
 import {blobToBase64, compressImage} from './lib/compress-image';
 import {AttachmentUploadStatus} from './components/IssueAttachments';
 import {SyncStatus} from './lib/gui-sync-statusmodel';
@@ -50,6 +60,21 @@ export const App = () => {
 		msg: 'idle',
 	});
 	const [state, setState] = useState<GuiState | null>(null);
+	// Assignable people for the board on screen, unlike state.contributors, which
+	// is the registry and stays empty until somebody is explicitly assigned.
+	const [contributors, setContributors] = useState<GuiContributor[]>([]);
+
+	// One value, not two: the scrubber derives its coordinate system from both,
+	// so applying either alone draws the chart against a range it doesn't match.
+	const [history, setHistory] = useState<{
+		timeline: GuiEventTimeline | null;
+		commits: GuiCommitEntry[];
+	}>({timeline: null, commits: []});
+	const [historyBuffer] = useState(() => createHistoryBuffer(setHistory));
+	const [commitInspectError, setCommitInspectError] = useState<string | null>(
+		null,
+	);
+	const [removeError, setRemoveError] = useState<string | null>(null);
 	const [dragOverSwimlaneId, setDragOverSwimlaneId] = useState<string | null>(
 		null,
 	);
@@ -73,12 +98,19 @@ export const App = () => {
 		state?.boards[0] ??
 		null;
 
+	// The board's internal id, as opposed to `boardId` from the route, which is
+	// its human-facing ref.
+	const selectedBoardId = selectedBoard?.id ?? null;
+
+	// The websocket handler is installed once and closes over the first render,
+	// so it reads the current board from a ref rather than that stale closure.
+	const selectedBoardIdRef = useRef<string | null>(selectedBoardId);
+	selectedBoardIdRef.current = selectedBoardId;
+
 	const boardSlug = selectedBoard?.ref ?? boardId;
 
 	const selectedIssue = state && issueId ? findIssue(state, issueId) : null;
 
-	// Paste-to-attach: the fastest screenshot flow. Text inputs keep their
-	// native paste behavior.
 	useEffect(() => {
 		const onPaste = (event: ClipboardEvent) => {
 			if (!selectedIssue || selectedIssue.readonly) return;
@@ -120,7 +152,7 @@ export const App = () => {
 		useState<AttachmentUploadStatus>({state: 'idle'});
 
 	const requestState = () => {
-		socketRef.current?.send(JSON.stringify({type: 'state:get'}));
+		sendSocketJson(socketRef.current, {type: 'state:get'});
 	};
 
 	useEffect(() => {
@@ -132,7 +164,9 @@ export const App = () => {
 
 		socket.addEventListener('open', () => {
 			setConnected(true);
-			socket.send(JSON.stringify({type: 'state:get'}));
+			sendSocketJson(socket, {type: 'state:get'});
+			// History is not requested here: the scrubber owns the scope and drives
+			// that fetch itself, so asking here would ignore its stored selection.
 		});
 
 		socket.addEventListener('close', () => {
@@ -163,6 +197,61 @@ export const App = () => {
 
 			if (message.type === 'failed') {
 				console.log('Failed', message);
+				requestState();
+			}
+
+			if (message.type === 'timeline') {
+				const nextTimeline = getResultValue<GuiEventTimeline>(message.payload);
+				if (nextTimeline) {
+					historyBuffer.accept(message.requestId, {timeline: nextTimeline});
+				}
+			}
+
+			// The state broadcast carries board data, not the assignable-people
+			// list, so assigning and removing need an explicit re-request.
+			if (
+				message.type === 'contributor:remove:result' ||
+				message.type === 'issue:assignee:add:result'
+			) {
+				sendSocketJson(socketRef.current, {
+					type: 'contributors:get',
+					payload: {boardId: selectedBoardIdRef.current},
+				});
+			}
+
+			if (
+				message.type === 'contributor:remove:result' &&
+				message.payload?.status === 'fail'
+			) {
+				setRemoveError(
+					`Couldn't remove a contributor: ${message.payload.message}`,
+				);
+			}
+
+			if (message.type === 'contributors') {
+				const next = getResultValue<GuiContributor[]>(message.payload);
+				if (next) setContributors(next);
+			}
+
+			if (message.type === 'commits') {
+				const nextCommits = getResultValue<GuiCommitEntry[]>(message.payload);
+				if (nextCommits) {
+					historyBuffer.accept(message.requestId, {commits: nextCommits});
+				}
+			}
+
+			if (
+				message.type === 'commit:inspect:result' &&
+				message.payload?.status === 'fail'
+			) {
+				setCommitInspectError(message.payload.message);
+			}
+
+			if (
+				message.type === 'time-travel:result' &&
+				message.payload?.status === 'fail'
+			) {
+				console.log('Time travel failed', message);
 				requestState();
 			}
 
@@ -206,7 +295,7 @@ export const App = () => {
 	};
 
 	const send = (type: string, payload: unknown) => {
-		socketRef.current?.send(JSON.stringify({type, payload}));
+		sendSocketJson(socketRef.current, {type, payload});
 	};
 
 	const selectIssue = (nextIssueId: string) => {
@@ -299,7 +388,29 @@ export const App = () => {
 		send('issue:tag:remove', {issueId, tagId});
 	};
 
-	const addIssueAssignee = (issueId: string, assigneeName: string) => {
+	const addIssueAssignee = (issueId: string, assigneeId: string) => {
+		const picked = contributors.find(c => c.id === assigneeId);
+
+		setState(prev => {
+			if (!prev || !picked) return prev;
+
+			return updateIssueInGuiState(prev, issueId, issue =>
+				issue.assignees.some(assignee => assignee.id === assigneeId)
+					? issue
+					: {...issue, assignees: [...issue.assignees, picked]},
+			);
+		});
+
+		send('issue:assignee:add', {issueId, assigneeId});
+	};
+
+	// Clears the display name only; the id and every assignment survive.
+	const removeContributor = (contributorId: string) => {
+		send('contributor:remove', {contributorId});
+	};
+
+	// Invent a person who has no record at all in the in the event logs.
+	const addExternalIssueAssignee = (issueId: string, assigneeName: string) => {
 		setState(prev => {
 			if (!prev) return prev;
 
@@ -322,7 +433,7 @@ export const App = () => {
 			});
 		});
 
-		send('issue:assignee:add', {issueId, assigneeName});
+		send('issue:assignee:add', {issueId, assigneeName, createUnlinked: true});
 	};
 
 	const removeIssueAssignee = (issueId: string, assigneeId: string) => {
@@ -365,6 +476,73 @@ export const App = () => {
 
 		send('issue:reopen', {issueId});
 	};
+
+	const scrubToTime = (targetTime: number) => {
+		send('time-travel:scrub', {targetTime});
+	};
+
+	const returnToLive = () => {
+		send('time-travel:live', {});
+	};
+
+	// Both requests carry the same id so their replies can be paired, and replies
+	// to an abandoned request discarded.
+	const requestBoardHistory = useCallback(
+		(start?: number, end?: number, allBoards?: boolean) => {
+			const window = start !== undefined ? {start, end} : undefined;
+
+			const requestId = historyBuffer.open();
+			// The board scopes the timeline but not the commit log, which is
+			// repository-wide. Omitting boardId is how the API says "every board".
+			sendSocketJson(socketRef.current, {
+				type: 'timeline:get',
+				payload: {
+					...window,
+					boardId: allBoards ? undefined : selectedBoardId,
+					requestId,
+				},
+			});
+			sendSocketJson(socketRef.current, {
+				type: 'commits:get',
+				payload: {...window, requestId},
+			});
+		},
+		[selectedBoardId],
+	);
+
+	// Answering this replays the whole event log server-side, and the assignee
+	// picker is its only reader — so it is fetched when that picker opens rather
+	// than eagerly for every board.
+	const requestContributors = useCallback(() => {
+		sendSocketJson(socketRef.current, {
+			type: 'contributors:get',
+			payload: {boardId: selectedBoardIdRef.current},
+		});
+	}, []);
+
+	// The list is board-scoped, so a board change must not leave the previous
+	// board's people on screen until the next open re-fetches.
+	useEffect(() => {
+		setContributors([]);
+	}, [selectedBoardId]);
+
+	const inspectCommit = useCallback((sha: string) => {
+		sendSocketJson(socketRef.current, {type: 'commit:inspect', payload: {sha}});
+	}, []);
+
+	useEffect(() => {
+		if (!commitInspectError) return;
+
+		const timeout = setTimeout(() => setCommitInspectError(null), 8000);
+		return () => clearTimeout(timeout);
+	}, [commitInspectError]);
+
+	useEffect(() => {
+		if (!removeError) return;
+
+		const timeout = setTimeout(() => setRemoveError(null), 8000);
+		return () => clearTimeout(timeout);
+	}, [removeError]);
 
 	const selectBoard = (nextBoardId: string) => {
 		setBoardMenuOpen(false);
@@ -533,7 +711,35 @@ export const App = () => {
 				flexDirection: 'column',
 			}}
 		>
+			<GlobalScrollbarStyles />
+
+			{commitInspectError && (
+				<ErrorToast
+					message={`Couldn't open commit diff: ${commitInspectError}`}
+					onDismiss={() => setCommitInspectError(null)}
+				/>
+			)}
+
+			{removeError && (
+				<ErrorToast
+					message={removeError}
+					onDismiss={() => setRemoveError(null)}
+				/>
+			)}
+
 			<Header state={state} connected={connected} syncStatus={syncStatus} />
+
+			<TimeScrubber
+				timeline={history.timeline}
+				commits={history.commits}
+				boardId={selectedBoardId}
+				connected={connected}
+				onRequestHistory={requestBoardHistory}
+				onInspectCommit={inspectCommit}
+				timeTravel={state?.timeTravel ?? {mode: 'live', asOfTime: null}}
+				onScrub={scrubToTime}
+				onReturnToLive={returnToLive}
+			/>
 
 			<div
 				style={{
@@ -542,9 +748,24 @@ export const App = () => {
 					overflow: 'hidden',
 				}}
 			>
-				<main style={{padding: '0 30px 30px 30px', overflow: 'auto', flex: 1}}>
+				{/* Vertical overflow is hidden here: the swimlanes size themselves to
+				    this box, so anything spilling out would put a second scrollbar on
+				    the page next to the columns' own. */}
+				<main
+					style={{
+						// No bottom padding: the board row is the horizontal scroll
+						// container, and a gap below it would strand its scrollbar.
+						padding: '0 30px 0 30px',
+						flex: 1,
+						minHeight: 0,
+						display: 'flex',
+						flexDirection: 'column',
+						overflow: 'hidden',
+					}}
+				>
 					<div style={{padding: '20px 10px'}}>
 						<Dropdown
+							testId="board-switcher"
 							label="Board:"
 							value={
 								selectedBoard
@@ -565,7 +786,19 @@ export const App = () => {
 						/>
 					</div>
 
-					<div style={{display: 'flex', gap: 8}}>
+					{/* Scrolling sideways is this row's job; scrolling down is each
+					    column's. Both on one element gives a page-level vertical bar
+					    alongside each column's own. */}
+					<div
+						style={{
+							display: 'flex',
+							gap: 8,
+							flex: 1,
+							minHeight: 0,
+							overflowX: 'auto',
+							overflowY: 'hidden',
+						}}
+					>
 						{selectedBoard?.swimlanes.map(swimlane => (
 							<SwimlaneColumn
 								key={swimlane.id}
@@ -591,13 +824,10 @@ export const App = () => {
 							/>
 						))}
 
-						{/* Invisible spacer, only present while the panel is closed, so
-							`main`'s scrollWidth grows by exactly what its clientWidth
-							gained by reclaiming the panel's space — keeping the max
-							scrollLeft identical across open/closed and avoiding the
-							clamp-triggered "bounce back" when scrolled far right. It
-							never reduces the board's real width the way reserving box
-							space in the flex row would. */}
+						{/* Grows scrollWidth by exactly what closing the panel gave back
+							in clientWidth, keeping max scrollLeft identical across
+							open/closed so the board doesn't bounce back when scrolled
+							far right. */}
 						{!(selectedIssue && state?.user) && (
 							<div style={{width: ASIDE_WIDTH, flexShrink: 0}} />
 						)}
@@ -617,6 +847,8 @@ export const App = () => {
 						onAddTag={addIssueTag}
 						onRemoveTag={removeIssueTag}
 						onAddAssignee={addIssueAssignee}
+						onAddExternalAssignee={addExternalIssueAssignee}
+						onRemoveContributor={removeContributor}
 						onRemoveAssignee={removeIssueAssignee}
 						onAddComment={addIssueComment}
 						onDeleteComment={deleteIssueComment}
@@ -627,7 +859,8 @@ export const App = () => {
 						onReopenIssue={reopenIssue}
 						onCloseIssue={closeIssue}
 						knownTags={state.tags ?? []}
-						knownAssignees={state.contributors ?? []}
+						knownAssignees={contributors}
+						onOpenAssigneePicker={requestContributors}
 					/>
 				)}
 			</div>

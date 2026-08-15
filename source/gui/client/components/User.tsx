@@ -1,5 +1,4 @@
 import {GuiUser, GuiState} from '../lib/gui-state.model';
-import {getContrastTextColor} from '../lib/gui-theme';
 
 export const User = ({
 	user,
@@ -20,12 +19,13 @@ export const User = ({
 			display: 'flex',
 			alignItems: 'center',
 			justifyContent: 'center',
-			background: user.color,
-			color: getContrastTextColor(user.color),
+			background: 'transparent',
+			color: user.color,
+			border: `1px solid ${user.color}`,
 			fontSize: 11,
 			fontWeight: 700,
-			marginLeft: index === 0 ? 0 : -6,
-			border: `2px solid #1a1a1a`,
+			marginLeft: index === 0 ? 0 : 4,
+			flexShrink: 0,
 		}}
 	>
 		{user.name.at(0)?.toUpperCase()}
