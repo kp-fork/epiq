@@ -1,11 +1,17 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {useNavigate, useParams, useSearchParams} from 'react-router-dom';
+import {
+	useMatch,
+	useNavigate,
+	useParams,
+	useSearchParams,
+} from 'react-router-dom';
 import {ASIDE_WIDTH} from './components/Aside';
 import {Button} from './components/Button';
 import {CreateIssueModal} from './components/CreateIssueModal';
 import {Dropdown} from './components/Dropdown';
 import {Header} from './components/Header';
 import {IssueDetails} from './components/IssueDetails';
+import {BulkDetails} from './components/BulkDetails';
 import {SwimlaneColumn} from './components/SwimlaneColumn';
 import {GlobalScrollbarStyles} from './components/GlobalScrollbarStyles';
 import {ErrorToast} from './components/ErrorToast';
@@ -27,6 +33,7 @@ import {
 } from './lib/gui-state.model';
 import {sendSocketJson} from './lib/socket-send';
 import {createHistoryBuffer} from './lib/history-buffer';
+import {createMutationGate} from './lib/mutation-gate';
 import {blobToBase64, compressImage} from './lib/compress-image';
 import {AttachmentUploadStatus} from './components/IssueAttachments';
 import {SyncStatus} from './lib/gui-sync-statusmodel';
@@ -47,10 +54,16 @@ export const DropIndicator = () => (
 );
 
 export const App = () => {
-	const {boardId, issueId} = useParams<{
-		boardId: string;
-		issueId?: string;
-	}>();
+	const {boardId} = useParams<{boardId: string}>();
+
+	// Read off the path rather than from route params: one route element serves
+	// every board path, so selecting a ticket cannot swap the element and
+	// remount the board.
+	const issueMatch = useMatch('/board/:boardId/issue/:issueId');
+	// Legacy form without the /issue/ segment, so old links keep working.
+	const legacyIssueMatch = useMatch('/board/:boardId/:issueId');
+	const issueId =
+		issueMatch?.params.issueId ?? legacyIssueMatch?.params.issueId;
 
 	const [searchParams, setSearchParams] = useSearchParams();
 
@@ -67,18 +80,23 @@ export const App = () => {
 	// One value, not two: the scrubber derives its coordinate system from both,
 	// so applying either alone draws the chart against a range it doesn't match.
 	const [history, setHistory] = useState<{
+		requestId: number;
 		timeline: GuiEventTimeline | null;
 		commits: GuiCommitEntry[];
-	}>({timeline: null, commits: []});
+	}>({requestId: 0, timeline: null, commits: []});
 	const [historyBuffer] = useState(() => createHistoryBuffer(setHistory));
 	const [commitInspectError, setCommitInspectError] = useState<string | null>(
 		null,
 	);
 	const [removeError, setRemoveError] = useState<string | null>(null);
+	const [actionError, setActionError] = useState<string | null>(null);
 	const [dragOverSwimlaneId, setDragOverSwimlaneId] = useState<string | null>(
 		null,
 	);
 	const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+	// Tickets picked for a bulk action. The route still tracks the single ticket
+	// whose details are open, which is a different thing.
+	const [pickedIssueIds, setPickedIssueIds] = useState<string[]>([]);
 	const [boardMenuOpen, setBoardMenuOpen] = useState(false);
 	const [createIssueModal, setCreateIssueModal] = useState<{
 		swimlaneId: string;
@@ -87,6 +105,7 @@ export const App = () => {
 
 	const boardMenuRef = useRef<HTMLDivElement | null>(null);
 	const socketRef = useRef<WebSocket | null>(null);
+	const [mutationGate] = useState(createMutationGate);
 
 	const selectedTab =
 		searchParams.get('tab') === 'comments' ? 'comments' : 'overview';
@@ -164,6 +183,7 @@ export const App = () => {
 
 		socket.addEventListener('open', () => {
 			setConnected(true);
+			mutationGate.reset();
 			sendSocketJson(socket, {type: 'state:get'});
 			// History is not requested here: the scrubber owns the scope and drives
 			// that fetch itself, so asking here would ignore its stored selection.
@@ -171,6 +191,7 @@ export const App = () => {
 
 		socket.addEventListener('close', () => {
 			setConnected(false);
+			mutationGate.reset();
 
 			if (socketRef.current === socket) {
 				socketRef.current = null;
@@ -180,7 +201,9 @@ export const App = () => {
 		socket.addEventListener('message', event => {
 			const message = JSON.parse(event.data);
 
-			if (message.type === 'state') {
+			mutationGate.received(message.type);
+
+			if (message.type === 'state' && !mutationGate.holdsState()) {
 				const nextState = getResultValue<GuiState>(message.payload);
 				if (nextState) setState(nextState);
 			}
@@ -195,8 +218,15 @@ export const App = () => {
 				}
 			}
 
+			// A refused mutation is otherwise invisible: the optimistic update is
+			// simply undone by the state that follows, which reads as the board
+			// ignoring the action.
 			if (message.type === 'failed') {
-				console.log('Failed', message);
+				setActionError(
+					typeof message.payload === 'string'
+						? message.payload
+						: 'The board refused that change',
+				);
 				requestState();
 			}
 
@@ -295,10 +325,43 @@ export const App = () => {
 	};
 
 	const send = (type: string, payload: unknown) => {
+		mutationGate.sent(type);
 		sendSocketJson(socketRef.current, {type, payload});
 	};
 
-	const selectIssue = (nextIssueId: string) => {
+	const togglePicked = (nextIssueId: string) => {
+		setPickedIssueIds(current =>
+			current.includes(nextIssueId)
+				? current.filter(id => id !== nextIssueId)
+				: [...current, nextIssueId],
+		);
+	};
+
+	const clearPicked = () => setPickedIssueIds([]);
+
+	const [bulkTagName, setBulkTagName] = useState('');
+	const [bulkAssigneeName, setBulkAssigneeName] = useState('');
+
+	// Every selected ticket, in board order, so the panel lists them the way the
+	// columns do.
+	const pickedIssues = (state?.boards ?? [])
+		.flatMap(board => board.swimlanes)
+		.flatMap(swimlane => swimlane.issues)
+		.filter(issue => pickedIssueIds.includes(issue.id));
+
+	// Each bulk action fans out to the per-issue message, so the server needs no
+	// bulk API and every change stays one auditable event.
+	const forPicked = (act: (issueId: string) => void) => {
+		for (const issue of pickedIssues) act(issue.id);
+	};
+
+	const selectIssue = (nextIssueId: string, {toggle} = {toggle: false}) => {
+		if (toggle) return togglePicked(nextIssueId);
+
+		// A plain click both opens the ticket and makes it the selection, so a
+		// following modifier-click extends from it instead of starting over.
+		setPickedIssueIds([nextIssueId]);
+
 		if (!boardSlug) return;
 
 		void navigate(
@@ -524,6 +587,7 @@ export const App = () => {
 	// board's people on screen until the next open re-fetches.
 	useEffect(() => {
 		setContributors([]);
+		setPickedIssueIds([]);
 	}, [selectedBoardId]);
 
 	const inspectCommit = useCallback((sha: string) => {
@@ -543,6 +607,13 @@ export const App = () => {
 		const timeout = setTimeout(() => setRemoveError(null), 8000);
 		return () => clearTimeout(timeout);
 	}, [removeError]);
+
+	useEffect(() => {
+		if (!actionError) return;
+
+		const timeout = setTimeout(() => setActionError(null), 8000);
+		return () => clearTimeout(timeout);
+	}, [actionError]);
 
 	const selectBoard = (nextBoardId: string) => {
 		setBoardMenuOpen(false);
@@ -727,11 +798,19 @@ export const App = () => {
 				/>
 			)}
 
+			{actionError && (
+				<ErrorToast
+					message={actionError}
+					onDismiss={() => setActionError(null)}
+				/>
+			)}
+
 			<Header state={state} connected={connected} syncStatus={syncStatus} />
 
 			<TimeScrubber
 				timeline={history.timeline}
 				commits={history.commits}
+				historyId={history.requestId}
 				boardId={selectedBoardId}
 				connected={connected}
 				onRequestHistory={requestBoardHistory}
@@ -752,6 +831,7 @@ export const App = () => {
 				    this box, so anything spilling out would put a second scrollbar on
 				    the page next to the columns' own. */}
 				<main
+					onClick={clearPicked}
 					style={{
 						// No bottom padding: the board row is the horizontal scroll
 						// container, and a gap below it would strand its scrollbar.
@@ -815,7 +895,19 @@ export const App = () => {
 								onSelectIssue={selectIssue}
 								onSelectIssueComments={selectIssueComments}
 								onCreateIssue={openCreateIssueModal}
-								onDropIssue={moveIssue(setState, socketRef)}
+								onDropIssue={(issueId, swimlaneId, targetIndex) => {
+									const moving = pickedIssueIds.includes(issueId)
+										? pickedIssueIds
+										: [issueId];
+
+									moveIssue(state, setState, send)(
+										moving,
+										swimlaneId,
+										targetIndex,
+									);
+									clearPicked();
+								}}
+								pickedIssueIds={pickedIssueIds}
 								onDragOver={setDragOverSwimlaneId}
 								onDragOverIssue={(swimlaneId, index) =>
 									setDropTarget({swimlaneId, index})
@@ -834,7 +926,39 @@ export const App = () => {
 					</div>
 				</main>
 
-				{selectedIssue && state?.user && (
+				{pickedIssues.length > 1 && (
+					<BulkDetails
+						issues={pickedIssues}
+						knownTags={state?.tags ?? []}
+						knownAssignees={contributors}
+						tagName={bulkTagName}
+						assigneeName={bulkAssigneeName}
+						onChangeTagName={setBulkTagName}
+						onChangeAssigneeName={setBulkAssigneeName}
+						onAddTag={name => {
+							forPicked(id => addIssueTag(id, name));
+							setBulkTagName('');
+						}}
+						onRemoveTag={tagId => forPicked(id => removeIssueTag(id, tagId))}
+						onAddAssignee={assigneeId =>
+							forPicked(id => addIssueAssignee(id, assigneeId))
+						}
+						onRemoveAssignee={assigneeId =>
+							forPicked(id => removeIssueAssignee(id, assigneeId))
+						}
+						onCloseIssues={() => {
+							forPicked(closeIssue);
+							clearPicked();
+						}}
+						onReopenIssues={() => {
+							forPicked(reopenIssue);
+							clearPicked();
+						}}
+						onClear={clearPicked}
+					/>
+				)}
+
+				{pickedIssues.length <= 1 && selectedIssue && state?.user && (
 					<IssueDetails
 						whoAmI={state.user}
 						issue={selectedIssue}

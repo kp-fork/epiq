@@ -1,3 +1,4 @@
+import {useEffect, useRef} from 'react';
 import {GuiComment, GuiIssue} from '../lib/gui-state.model';
 import {GUI_THEME} from '../lib/gui-theme';
 import {CopyRef} from './CopyRef';
@@ -8,34 +9,58 @@ export const TicketCard = ({
 	ticket,
 	index,
 	isSelected,
+	isPicked,
 	commentCount,
 	onOpenComments,
 	onSelect,
-	onDragStart,
 	onDragOverIssue,
 	onDropIssueAt,
 }: {
 	ticket: GuiIssue;
 	index: number;
 	isSelected: boolean;
-	onSelect: () => void;
+	// Part of a multi-ticket selection, which reads differently from the one
+	// ticket whose details are open.
+	isPicked: boolean;
+	onSelect: (options: {toggle: boolean}) => void;
 	commentCount: number;
 	onOpenComments: (issueId: string) => void;
-	onDragStart: (issueId: string) => void;
 	onDragOverIssue: (targetIndex: number) => void;
 	onDropIssueAt: (issueId: string, targetIndex: number) => void;
 }) => {
+	const cardRef = useRef<HTMLDivElement | null>(null);
+
+	// Opening the details panel takes 440px off the board, which can leave the
+	// card that was just clicked behind it.
+	useEffect(() => {
+		if (!isSelected) return;
+
+		cardRef.current?.scrollIntoView({
+			behavior: 'smooth',
+			block: 'nearest',
+			inline: 'nearest',
+		});
+	}, [isSelected]);
+
 	const getVisualTargetIndex = (isAfterMiddle: boolean) =>
 		index + (isAfterMiddle ? 1 : 0);
 
 	return (
 		<div
+			ref={cardRef}
 			draggable={!ticket.readonly}
-			onClick={onSelect}
+			// Stopped here, or the board's own click handler would clear the
+			// selection this click just made.
+			onClick={event => {
+				event.stopPropagation();
+				onSelect({toggle: event.metaKey || event.ctrlKey || event.shiftKey});
+			}}
+			// Carries the id and nothing else. Selecting here would navigate to
+			// the issue route mid-drag, remounting the board under the pointer so
+			// the drop never lands.
 			onDragStart={event => {
 				event.dataTransfer.effectAllowed = 'move';
 				event.dataTransfer.setData('text/plain', ticket.id);
-				onDragStart(ticket.id);
 			}}
 			onDragOver={event => {
 				event.preventDefault();
@@ -62,17 +87,24 @@ export const TicketCard = ({
 				display: 'flex',
 				alignItems: 'flex-start',
 				gap: 10,
-				color: isSelected ? GUI_THEME.accent : GUI_THEME.primary,
+				color: isSelected || isPicked ? GUI_THEME.accent : GUI_THEME.primary,
 				fontSize: 11,
 				cursor: ticket.readonly ? 'default' : 'grab',
-				background: isSelected
-					? 'rgba(118,228,255,0.08)'
-					: 'rgba(185, 192, 255, 0.06)',
+				background:
+					isSelected || isPicked
+						? 'rgba(118,228,255,0.08)'
+						: 'rgba(185, 192, 255, 0.06)',
 				padding: '10px 8px',
 				minHeight: '58px',
 				borderRadius: '8px',
 				marginBottom: 4,
-				border: `1px solid ${isSelected ? GUI_THEME.accent : 'transparent'}`,
+				border: `1px solid ${
+					isSelected || isPicked ? GUI_THEME.accent : 'transparent'
+				}`,
+				// Only the multi-selection is outlined, so it stays legible when the
+				// details panel is closed.
+				outline: isPicked ? `1px solid ${GUI_THEME.accent}` : undefined,
+				outlineOffset: 1,
 			}}
 		>
 			<div
